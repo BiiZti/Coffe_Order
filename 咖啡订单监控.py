@@ -41,10 +41,7 @@ project_data_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "dat
 os.makedirs(project_data_dir, exist_ok=True)
 chrome_options = Options()
 chrome_options.add_experimental_option("debuggerAddress", "127.0.0.1:80")
-# 添加后台运行选项，避免干扰用户
-chrome_options.add_argument("--disable-background-timer-throttling")
-chrome_options.add_argument("--disable-backgrounding-occluded-windows")
-chrome_options.add_argument("--disable-renderer-backgrounding")
+# 添加基础后台运行选项（兼容性更好）
 chrome_options.add_argument("--disable-notifications")
 chrome_options.add_argument("--disable-popup-blocking")
 chrome_options.add_argument("--disable-default-apps")
@@ -56,19 +53,9 @@ chrome_options.add_argument("--disable-images")
 chrome_options.add_argument("--disable-gpu")
 chrome_options.add_argument("--no-sandbox")
 chrome_options.add_argument("--disable-dev-shm-usage")
-# 禁用自动打开下载文件
+# 尝试禁用下载栏（使用更兼容的选项）
 chrome_options.add_argument("--disable-features=DownloadBubble")
-chrome_options.add_argument("--disable-features=DownloadBubbleV2")
 chrome_options.add_argument("--disable-features=DownloadShelf")
-chrome_options.add_argument("--disable-features=DownloadShelfV2")
-# 禁用下载栏和下载通知
-chrome_options.add_argument("--disable-download-notification")
-chrome_options.add_argument("--disable-download-bubble")
-chrome_options.add_argument("--disable-download-shelf")
-chrome_options.add_argument("--disable-download-bubble-v2")
-chrome_options.add_argument("--disable-download-shelf-v2")
-chrome_options.add_argument("--disable-download-bubble-v3")
-chrome_options.add_argument("--disable-download-shelf-v3")
 # 移除不兼容的Chrome选项
 # chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
 # chrome_options.add_experimental_option('useAutomationExtension', False)
@@ -132,6 +119,47 @@ class FileLockManager:
 
 # 创建全局锁管理器
 lock_manager = FileLockManager(os.path.join(project_data_dir, "data.lock"))
+
+# 全局最小化监控标志
+minimize_monitor_active = False
+
+
+def start_minimize_monitor():
+    """启动持续最小化监控"""
+    global minimize_monitor_active
+    if minimize_monitor_active:
+        return
+    
+    minimize_monitor_active = True
+    print("🔒 启动持续最小化监控...")
+    
+    def monitor_minimize():
+        global minimize_monitor_active
+        while minimize_monitor_active:
+            try:
+                # 强制最小化窗口
+                driver.minimize_window()
+                # 设置窗口为后台
+                driver.execute_script("window.focus = function() {};")
+                driver.execute_script("window.blur();")
+                # 移动窗口到屏幕外
+                driver.execute_script("window.moveTo(-1000, -1000);")
+                driver.execute_script("window.resizeTo(1, 1);")
+            except Exception as e:
+                pass
+            time.sleep(1)  # 每秒检查一次
+    
+    # 在后台线程中运行监控
+    import threading
+    monitor_thread = threading.Thread(target=monitor_minimize, daemon=True)
+    monitor_thread.start()
+
+
+def stop_minimize_monitor():
+    """停止持续最小化监控"""
+    global minimize_monitor_active
+    minimize_monitor_active = False
+    print("🔓 停止持续最小化监控")
 
 
 def is_valid_xlsx(path):
@@ -209,7 +237,7 @@ def move_file_to_project_data(source_path, target_filename):
 
 
 def switch_to_target_tab():
-    """切换到目标标签页或创建新标签页"""
+    """切换到目标标签页或创建新标签页（云电脑兼容版）"""
     target_url_prefix = "https://zhst.cmft.com.cn/mgmt/index.html#"
     
     # 首先尝试找到现有的目标页面
@@ -241,13 +269,41 @@ def switch_to_target_tab():
         else:
             print("❌ 输入错误，请输入 '已登录'")
     
-    # 强制最小化窗口并设置为后台运行
+    # 用户登录确认后，启动持续最小化监控
+    print("🔒 启动持续最小化监控...")
+    start_minimize_monitor()
+    
+    # 强制最小化窗口并设置为后台运行（云电脑环境）
     try:
-        driver.minimize_window()
+        # 多次尝试最小化，确保在云电脑环境中生效
+        for i in range(3):
+            driver.minimize_window()
+            time.sleep(0.5)
+        
         # 设置窗口为后台运行
         driver.execute_script("window.focus = function() {};")
-        # 禁用下载栏显示
+        driver.execute_script("window.blur();")
+        
+        # 禁用窗口激活事件（云电脑环境）
         driver.execute_script("""
+            // 禁用所有可能的焦点事件
+            window.addEventListener('focus', function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                window.blur();
+                return false;
+            }, true);
+            
+            window.addEventListener('activate', function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                return false;
+            }, true);
+            
+            // 设置窗口属性
+            window.name = 'background_window';
+            window.opener = null;
+            
             // 尝试禁用下载栏
             if (window.chrome && window.chrome.downloads) {
                 window.chrome.downloads.onChanged.addListener(function(downloadDelta) {
@@ -257,7 +313,8 @@ def switch_to_target_tab():
             }
         """)
         print("✅ 已最小化后台标签页窗口并设置为后台运行")
-    except:
+    except Exception as e:
+        print(f"⚠️ 窗口设置警告: {e}")
         print("✅ 已创建新标签页用于后台操作")
 
 
@@ -283,7 +340,7 @@ def check_login_status():
 
 
 def click_waimai_menu():
-    """静默跳转到外卖订单管理页面，确保在后台运行"""
+    """静默跳转到外卖订单管理页面，确保在后台运行（云电脑兼容版）"""
     current_url = driver.current_url
     target_url = "https://zhst.cmft.com.cn/mgmt/index.html#/report-form/take-out-order-mgmt/OlOrderMgmt"
     
@@ -296,36 +353,73 @@ def click_waimai_menu():
     if not current_url.endswith("OlOrderMgmt"):
         print("🔄 准备跳转到外卖订单管理页面...")
         
-        # 预先设置窗口为后台运行，防止跳转时获得焦点
+        # 强制窗口最小化（云电脑环境）
         try:
-            driver.minimize_window()
+            # 多次尝试最小化，确保在云电脑环境中生效
+            for i in range(3):
+                driver.minimize_window()
+                time.sleep(0.5)
+            
+            # 设置窗口为后台运行
             driver.execute_script("window.focus = function() {};")
             driver.execute_script("window.blur();")
-            # 禁用窗口激活事件
+            
+            # 禁用窗口激活事件（更强制的方式）
             driver.execute_script("""
+                // 禁用所有可能的焦点事件
                 window.addEventListener('focus', function(e) {
                     e.preventDefault();
+                    e.stopPropagation();
                     window.blur();
+                    return false;
                 }, true);
+                
+                window.addEventListener('activate', function(e) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    return false;
+                }, true);
+                
+                // 设置窗口属性
+                window.name = 'background_window';
+                window.opener = null;
+                
+                // 持续监控并最小化
+                setInterval(function() {
+                    if (window.innerHeight > 100) {
+                        window.resizeTo(1, 1);
+                        window.moveTo(-1000, -1000);
+                    }
+                }, 100);
             """)
-        except:
-            pass
+            
+            print("✅ 已设置窗口为后台运行模式")
+        except Exception as e:
+            print(f"⚠️ 窗口设置警告: {e}")
         
-        # 使用JavaScript进行静默跳转，避免切换标签页
-        driver.execute_script(f"window.location.href = '{target_url}';")
-        print("✅ 已静默跳转到外卖订单管理页面")
+        # 使用JavaScript进行静默跳转
+        try:
+            driver.execute_script(f"window.location.href = '{target_url}';")
+            print("✅ 已静默跳转到外卖订单管理页面")
+        except Exception as e:
+            print(f"⚠️ JavaScript跳转失败，使用直接跳转: {e}")
+            driver.get(target_url)
         
         # 等待页面加载完成
         time.sleep(3)
         
-        # 再次确保窗口保持最小化状态
+        # 再次强制最小化（云电脑环境需要多次尝试）
         try:
-            driver.minimize_window()
+            for i in range(2):
+                driver.minimize_window()
+                time.sleep(0.5)
+            
+            # 再次设置后台运行
             driver.execute_script("window.focus = function() {};")
             driver.execute_script("window.blur();")
             print("✅ 已确保窗口保持最小化状态")
-        except:
-            pass
+        except Exception as e:
+            print(f"⚠️ 最终窗口设置警告: {e}")
     else:
         print("✅ 已在外卖订单管理页面")
     
@@ -750,6 +844,11 @@ def do_check():
     full_order_path = os.path.join(project_data_dir, full_order_filename)
     coffee_path = os.path.join(project_data_dir, coffee_filename)
 
+    # 确保启动持续最小化监控（无论是否已登录）
+    if not minimize_monitor_active:
+        print("🔒 启动持续最小化监控...")
+        start_minimize_monitor()
+
     # 在点击导出按钮之前开始监控下载目录
     print("🔍 开始监控下载目录...")
     download_monitor = start_download_monitor()
@@ -825,6 +924,7 @@ def start_program():
     print("   • 声音提示（无弹窗干扰）")
     print("   • 自动管理Excel文件")
     print("   • 静默运行，不干扰前端用户")
+    print("   • 持续最小化监控，防止窗口弹出")
     print("=" * 50)
     
     if is_valid_xlsx(coffee_path):
@@ -833,6 +933,7 @@ def start_program():
         print(f"📄 将创建新的咖啡订单表: {os.path.basename(coffee_path)}")
 
     print("🔍 正在连接浏览器并检查登录状态...")
+    
     do_check()
 
 
@@ -840,5 +941,11 @@ if __name__ == "__main__":
     try:
         root.after(0, start_program)
         root.mainloop()
-    except Exception:
-        logging.exception("❌ 主程序运行失败")
+    except KeyboardInterrupt:
+        print("\n🛑 程序被用户中断")
+    except Exception as e:
+        logging.exception("❌ 程序运行出错")
+    finally:
+        # 停止最小化监控
+        stop_minimize_monitor()
+        print("👋 程序结束")
