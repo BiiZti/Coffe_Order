@@ -56,6 +56,19 @@ chrome_options.add_argument("--disable-images")
 chrome_options.add_argument("--disable-gpu")
 chrome_options.add_argument("--no-sandbox")
 chrome_options.add_argument("--disable-dev-shm-usage")
+# 禁用自动打开下载文件
+chrome_options.add_argument("--disable-features=DownloadBubble")
+chrome_options.add_argument("--disable-features=DownloadBubbleV2")
+chrome_options.add_argument("--disable-features=DownloadShelf")
+chrome_options.add_argument("--disable-features=DownloadShelfV2")
+# 禁用下载栏和下载通知
+chrome_options.add_argument("--disable-download-notification")
+chrome_options.add_argument("--disable-download-bubble")
+chrome_options.add_argument("--disable-download-shelf")
+chrome_options.add_argument("--disable-download-bubble-v2")
+chrome_options.add_argument("--disable-download-shelf-v2")
+chrome_options.add_argument("--disable-download-bubble-v3")
+chrome_options.add_argument("--disable-download-shelf-v3")
 # 移除不兼容的Chrome选项
 # chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
 # chrome_options.add_experimental_option('useAutomationExtension', False)
@@ -233,6 +246,16 @@ def switch_to_target_tab():
         driver.minimize_window()
         # 设置窗口为后台运行
         driver.execute_script("window.focus = function() {};")
+        # 禁用下载栏显示
+        driver.execute_script("""
+            // 尝试禁用下载栏
+            if (window.chrome && window.chrome.downloads) {
+                window.chrome.downloads.onChanged.addListener(function(downloadDelta) {
+                    // 阻止下载栏显示
+                    return false;
+                });
+            }
+        """)
         print("✅ 已最小化后台标签页窗口并设置为后台运行")
     except:
         print("✅ 已创建新标签页用于后台操作")
@@ -271,6 +294,23 @@ def click_waimai_menu():
     
     # 如果当前不在目标页面，则静默跳转
     if not current_url.endswith("OlOrderMgmt"):
+        print("🔄 准备跳转到外卖订单管理页面...")
+        
+        # 预先设置窗口为后台运行，防止跳转时获得焦点
+        try:
+            driver.minimize_window()
+            driver.execute_script("window.focus = function() {};")
+            driver.execute_script("window.blur();")
+            # 禁用窗口激活事件
+            driver.execute_script("""
+                window.addEventListener('focus', function(e) {
+                    e.preventDefault();
+                    window.blur();
+                }, true);
+            """)
+        except:
+            pass
+        
         # 使用JavaScript进行静默跳转，避免切换标签页
         driver.execute_script(f"window.location.href = '{target_url}';")
         print("✅ 已静默跳转到外卖订单管理页面")
@@ -278,12 +318,12 @@ def click_waimai_menu():
         # 等待页面加载完成
         time.sleep(3)
         
-        # 确保窗口保持最小化状态
+        # 再次确保窗口保持最小化状态
         try:
             driver.minimize_window()
-            # 设置窗口为后台运行
             driver.execute_script("window.focus = function() {};")
             driver.execute_script("window.blur();")
+            print("✅ 已确保窗口保持最小化状态")
         except:
             pass
     else:
