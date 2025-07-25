@@ -21,14 +21,14 @@ excel_file_modified_time = None  # 记录Excel文件最后修改时间
 is_excel_updating = False  # 标记Excel是否正在被外部程序更新
 
 # 订单状态常量
-PENDING = 2          # 未完成
+PENDING = 2          # 备货中
 COMPLETED = 5        # 已完成
 
 # Excel文件路径配置
 # 获取项目根目录的data文件夹路径
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 EXCEL_FOLDER = os.path.join(PROJECT_ROOT, "data")  # 从项目data文件夹读取Excel文件
-EXCEL_PATTERN = "*咖啡订单*.xlsx"  # 只匹配包含"咖啡订单"的Excel文件
+EXCEL_PATTERN = "*前端咖啡订单*.xlsx"  # 只匹配前端专用咖啡订单Excel文件
 
 def ensure_orders_folder():
     """确保桌面路径存在"""
@@ -78,15 +78,50 @@ def ensure_excel_files_writable():
 
 def map_order_status(status_text):
     """映射订单状态文本到数字状态"""
-    # 保持原始状态，不进行映射转换
-    # 这样前端可以显示原始的订单状态文本
-    return status_text
+    status_map = {
+        '备货中': '2',
+        '已完成': '5',
+        '2': '2',
+        '5': '5'
+    }
+    return status_map.get(str(status_text), str(status_text))
 
 def read_excel_orders():
     """从Excel文件读取订单数据"""
     global orders_db, excel_file_modified_time, is_excel_updating
     
     try:
+        # 检查是否有新数据标志
+        flag_file_path = os.path.join(EXCEL_FOLDER, "new_data_ready.flag")
+        if os.path.exists(flag_file_path):
+            print("🚩 检测到新数据标志，开始处理...")
+            # 创建锁文件，通知后端正在处理
+            lock_file_path = os.path.join(EXCEL_FOLDER, "data.lock")
+            try:
+                with open(lock_file_path, 'w') as f:
+                    json.dump({
+                        'pid': os.getpid(),
+                        'timestamp': time.time(),
+                        'process': 'frontend_processing'
+                    }, f)
+                print("🔒 已创建前端处理锁")
+            except Exception as e:
+                print(f"⚠️ 创建锁文件失败: {e}")
+        
+        # 检查文件锁
+        lock_file_path = os.path.join(EXCEL_FOLDER, "data.lock")
+        if os.path.exists(lock_file_path):
+            try:
+                with open(lock_file_path, 'r') as f:
+                    lock_info = json.load(f)
+                    lock_time = lock_info.get('timestamp', 0)
+                    # 如果锁文件超过30秒，可能是僵尸锁，可以忽略
+                    if time.time() - lock_time < 30:
+                        print("⚠️ 检测到文件锁，等待数据更新完成...")
+                        return  # 跳过本次读取
+            except:
+                pass  # 如果读取锁文件失败，继续正常流程
+        
         # 确保桌面路径存在
         if not ensure_orders_folder():
             print("❌ 无法访问桌面路径，使用空订单列表")
@@ -106,6 +141,12 @@ def read_excel_orders():
         
         # 读取最新的咖啡订单Excel文件
         latest_file = max(excel_files, key=os.path.getctime)
+        
+        # 检查文件是否存在
+        if not os.path.exists(latest_file):
+            print(f"⚠️ 文件不存在，可能被删除: {latest_file}")
+            orders_db = []
+            return
         
         # 检查Excel文件是否被外部程序修改
         current_modified_time = os.path.getmtime(latest_file)
@@ -136,8 +177,17 @@ def read_excel_orders():
         print(f"读取咖啡订单Excel文件: {latest_file}")
         
         # 读取Excel数据
-        df = pd.read_excel(latest_file, engine='openpyxl')
-        print(f"成功读取咖啡订单Excel文件，数据行数: {len(df)}")
+        try:
+            df = pd.read_excel(latest_file, engine='openpyxl')
+            print(f"成功读取咖啡订单Excel文件，数据行数: {len(df)}")
+        except FileNotFoundError:
+            print(f"⚠️ 文件被删除，等待重新生成: {latest_file}")
+            # 等待一段时间，让后端重新生成文件
+            time.sleep(2)
+            return
+        except Exception as e:
+            print(f"❌ 读取Excel文件失败: {e}")
+            return
         
         # 保存现有订单数据用于比较
         old_orders_db = orders_db.copy()
@@ -164,23 +214,32 @@ def read_excel_orders():
                 if status_text == '已取消':
                     continue
                 
-                # 根据您指定的列名映射数据
+                # 根据前端Excel格式映射数据
+                status_code = str(row.get('状态', '2'))
+                status_name = str(row.get('状态名称', '备货中'))
+                
+                # 如果状态名称为空，根据状态代码生成
+                if not status_name or status_name == 'nan':
+                    if status_code == '5':
+                        status_name = '已完成'
+                    else:
+                        status_name = '备货中'
+                
                 order = {
                     'id': valid_order_id,
                     'number': str(order_number),
-                    'status': map_order_status(status_text),
+                    'status': status_name,  # 使用状态名称而不是代码
                     'userName': str(row.get('姓名', '未知')),
                     'phone': str(row.get('手机号码', '未知')),
                     'address': str(row.get('部门', '未知')),
-                    'amount': float(row.get('订单金额', 0)),
-                    'remark': f"取餐码: {str(row.get('取餐码', ''))}",
-                    'orderTime': str(row.get('订单时间', datetime.now().isoformat())),
+                    'amount': 0.0,  # 前端Excel中没有金额字段
+                    'orderTime': str(row.get('支付时间', datetime.now().isoformat())),
                     'dishes': []
                 }
                 
-                # 处理商品信息（Unnamed: 39列）
-                if 'Unnamed: 39' in row and pd.notna(row['Unnamed: 39']):
-                    dishes_str = str(row['Unnamed: 39'])
+                # 处理商品信息（订单分类字段）
+                if '订单分类' in row and pd.notna(row['订单分类']):
+                    dishes_str = str(row['订单分类'])
                     if dishes_str and dishes_str != 'nan':
                         # 如果包含逗号，按逗号分割；否则作为单个商品
                         if ',' in dishes_str:
@@ -262,6 +321,21 @@ def background_excel_reader():
         try:
             read_excel_orders()
             print(f"Excel数据刷新完成，当前订单数量: {len(orders_db)}")
+            
+            # 处理完成后，清理锁文件和新数据标志
+            try:
+                lock_file_path = os.path.join(EXCEL_FOLDER, "data.lock")
+                if os.path.exists(lock_file_path):
+                    os.remove(lock_file_path)
+                    print("🔓 已释放前端处理锁")
+                
+                flag_file_path = os.path.join(EXCEL_FOLDER, "new_data_ready.flag")
+                if os.path.exists(flag_file_path):
+                    os.remove(flag_file_path)
+                    print("🚩 已移除新数据标志")
+            except Exception as e:
+                print(f"⚠️ 清理标志文件失败: {e}")
+                
         except Exception as e:
             print(f"后台Excel读取出错: {e}")
         
@@ -364,9 +438,16 @@ def update_excel_order_status(order_id, new_status):
             
             print(f"🔧 更新Excel: 订单{order_id}, 状态{new_status} -> 文本状态'{status_text}'")
             
-            # 更新状态列（订单状态是第18列，R列）
-            status_cell = worksheet.cell(row=row_number, column=18)
+            # 更新状态列（状态名称是第9列，I列）
+            status_cell = worksheet.cell(row=row_number, column=9)
             status_cell.value = status_text
+            
+            # 同时更新状态代码列（状态是第8列，H列）
+            status_code_cell = worksheet.cell(row=row_number, column=8)
+            if status_text == '已完成':
+                status_code_cell.value = '5'
+            else:
+                status_code_cell.value = '2'
             
             # 保存文件
             workbook.save(latest_file)
@@ -425,6 +506,7 @@ def api_update_order(order_id, action):
                     'code': 0, 
                     'msg': message
                 })
+
         else:
             return jsonify({'code': 0, 'msg': '无效的操作'})
             

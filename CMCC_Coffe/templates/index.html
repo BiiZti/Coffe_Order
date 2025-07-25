@@ -449,6 +449,8 @@
 
 
 
+
+
         /* 商品信息样式 */
         .dishes-info {
             max-width: 200px;
@@ -526,15 +528,6 @@
 
         .btn-success:hover {
             background: #218838;
-        }
-
-        .btn-danger {
-            background: #dc3545;
-            color: white;
-        }
-
-        .btn-danger:hover {
-            background: #c82333;
         }
 
         .btn-link {
@@ -749,7 +742,6 @@
                             <th>订单号</th>
                             <th>订单状态</th>
                             <th>商品信息</th>
-                            <th>备注</th>
                             <th>用户名</th>
                             <th>手机号</th>
                             <th>地址</th>
@@ -974,7 +966,6 @@
                     <td>${order.number}</td>
                     <td><span class="status-badge ${statusClass}">${statusText}</span></td>
                     <td class="dishes-info" title="${dishesText}">${dishesText.length > 25 ? dishesText.substring(0, 25) + '...' : dishesText}</td>
-                    <td class="${remarkClass}" title="${remarkText}">${remarkText.length > 15 ? remarkText.substring(0, 15) + '...' : remarkText}</td>
                     <td>${order.userName || '未知'}</td>
                     <td>${order.phone || '未知'}</td>
                     <td title="${order.address || '未知'}">${(order.address || '未知').length > 20 ? (order.address || '未知').substring(0, 20) + '...' : (order.address || '未知')}</td>
@@ -993,7 +984,7 @@
             
             // 兼容数字状态（向后兼容）
             const statusMap = {
-                2: '未完成',
+                2: '备货中',
                 5: '已完成'
             };
             return statusMap[status] || '未知状态';
@@ -1004,6 +995,8 @@
             if (typeof status === 'string') {
                 if (status === '已完成') {
                     return 'status-completed';
+                } else if (status === '备货中' || status === '待接单') {
+                    return 'status-pending';
                 } else {
                     return 'status-pending';
                 }
@@ -1022,16 +1015,16 @@
             
             // 处理字符串状态
             if (typeof status === 'string') {
-                if (status !== '已完成') {
+                if (status === '备货中' || status === '待接单') {
                 buttons += `
-                        <button class="btn btn-secondary" onclick="updateOrder(${orderId}, 'complete')">${status}</button>
+                        <button class="btn btn-secondary" onclick="updateOrder(${orderId}, 'complete')">完成订单</button>
                 `;
                 }
             } else {
                 // 兼容数字状态（向后兼容）
-                if (status === 2) { // 未完成
+                if (status === 2) { // 备货中
                 buttons += `
-                        <button class="btn btn-secondary" onclick="updateOrder(${orderId}, 'complete')">未完成</button>
+                        <button class="btn btn-secondary" onclick="updateOrder(${orderId}, 'complete')">完成订单</button>
                 `;
                 }
             }

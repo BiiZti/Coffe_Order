@@ -10,6 +10,8 @@ import errno
 import openpyxl
 import win32com.client
 import winsound
+import threading
+import json
 
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
@@ -39,6 +41,10 @@ project_data_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "dat
 os.makedirs(project_data_dir, exist_ok=True)
 chrome_options = Options()
 chrome_options.add_experimental_option("debuggerAddress", "127.0.0.1:80")
+# 添加后台运行选项，避免干扰用户
+chrome_options.add_argument("--disable-background-timer-throttling")
+chrome_options.add_argument("--disable-backgrounding-occluded-windows")
+chrome_options.add_argument("--disable-renderer-backgrounding")
 try:
     # 尝试使用本地ChromeDriver
     service = Service("chromedriver.exe")
@@ -52,6 +58,53 @@ except Exception as e:
 root = tk.Tk()
 root.withdraw()
 coffee_path = None
+
+# 文件锁管理
+class FileLockManager:
+    def __init__(self, lock_file_path):
+        self.lock_file_path = lock_file_path
+        self.lock_file = None
+        self.lock_acquired = False
+    
+    def acquire_lock(self, timeout=30):
+        """获取文件锁"""
+        start_time = time.time()
+        while time.time() - start_time < timeout:
+            try:
+                # 创建锁文件
+                self.lock_file = open(self.lock_file_path, 'w')
+                # 写入锁信息
+                lock_info = {
+                    'pid': os.getpid(),
+                    'timestamp': time.time(),
+                    'process': 'coffee_monitor'
+                }
+                json.dump(lock_info, self.lock_file)
+                self.lock_file.flush()
+                self.lock_acquired = True
+                print(f"🔒 已获取文件锁: {self.lock_file_path}")
+                return True
+            except Exception as e:
+                print(f"⚠️ 获取锁失败，等待重试: {e}")
+                time.sleep(1)
+                continue
+        print(f"❌ 获取文件锁超时: {self.lock_file_path}")
+        return False
+    
+    def release_lock(self):
+        """释放文件锁"""
+        if self.lock_acquired and self.lock_file:
+            try:
+                self.lock_file.close()
+                if os.path.exists(self.lock_file_path):
+                    os.remove(self.lock_file_path)
+                self.lock_acquired = False
+                print(f"🔓 已释放文件锁: {self.lock_file_path}")
+            except Exception as e:
+                print(f"⚠️ 释放锁时出错: {e}")
+
+# 创建全局锁管理器
+lock_manager = FileLockManager(os.path.join(project_data_dir, "data.lock"))
 
 
 def is_valid_xlsx(path):
@@ -67,14 +120,27 @@ def is_valid_xlsx(path):
 
 
 def cleanup_old_data():
-    """清理旧的数据文件"""
+    """清理旧的数据文件（带文件锁保护）"""
+    # 尝试获取文件锁
+    if not lock_manager.acquire_lock(timeout=10):
+        print("⚠️ 无法获取文件锁，跳过数据清理（可能有其他程序正在访问数据）")
+        return
+    
     try:
         # 清理项目数据文件夹中的旧文件
         for file in os.listdir(project_data_dir):
             file_path = os.path.join(project_data_dir, file)
-            if os.path.isfile(file_path) and file.endswith('.xlsx'):
-                os.remove(file_path)
-                print(f"🗑️ 删除旧数据文件: {file}")
+            if os.path.isfile(file_path) and file.endswith('.xlsx') and not file.endswith('.lock'):
+                # 跳过前端咖啡订单文件
+                if '前端咖啡订单' in file:
+                    print(f"🛡️ 保护前端文件: {file}")
+                    continue
+                
+                try:
+                    os.remove(file_path)
+                    print(f"🗑️ 删除旧数据文件: {file}")
+                except Exception as e:
+                    print(f"⚠️ 删除文件失败 {file}: {e}")
         
         # 清理下载目录中的临时文件
         today_str = datetime.now().strftime("%Y%m%d")
@@ -90,10 +156,18 @@ def cleanup_old_data():
         print("✅ 旧数据清理完成")
     except Exception as e:
         print(f"⚠️ 清理旧数据时出错: {e}")
+    finally:
+        # 释放文件锁
+        lock_manager.release_lock()
 
 
 def move_file_to_project_data(source_path, target_filename):
-    """将文件移动到项目数据文件夹"""
+    """将文件移动到项目数据文件夹（带文件锁保护）"""
+    # 尝试获取文件锁
+    if not lock_manager.acquire_lock(timeout=10):
+        print("⚠️ 无法获取文件锁，跳过文件移动（可能有其他程序正在访问数据）")
+        return None
+    
     try:
         target_path = os.path.join(project_data_dir, target_filename)
         shutil.move(source_path, target_path)
@@ -102,21 +176,46 @@ def move_file_to_project_data(source_path, target_filename):
     except Exception as e:
         print(f"❌ 移动文件失败: {e}")
         return None
+    finally:
+        # 释放文件锁
+        lock_manager.release_lock()
 
 
 def switch_to_target_tab():
+    """切换到目标标签页或创建新标签页"""
     target_url_prefix = "https://zhst.cmft.com.cn/mgmt/index.html#"
+    
+    # 首先尝试找到现有的目标页面
     for handle in driver.window_handles:
         driver.switch_to.window(handle)
         if driver.current_url.startswith(target_url_prefix):
-            print(f"✅ 已切换到Dashboard标签页: {driver.current_url}")
+            print(f"✅ 已切换到现有Dashboard标签页: {driver.current_url}")
             return
-    raise Exception("❌ 未找到目标页面标签页，请先打开并登录")
+    
+    # 如果没有找到目标页面，创建新标签页
+    print("🔍 未找到目标页面，创建新标签页...")
+    driver.execute_script("window.open('');")
+    driver.switch_to.window(driver.window_handles[-1])
+    
+    # 尝试最小化窗口以减少干扰（如果可能）
+    try:
+        driver.minimize_window()
+        print("✅ 已最小化后台标签页窗口")
+    except:
+        print("✅ 已创建新标签页用于后台操作")
 
 
 def click_waimai_menu():
-    driver.get("https://zhst.cmft.com.cn/mgmt/index.html#/report-form/take-out-order-mgmt/OlOrderMgmt")
-    print("✅ 已直接跳转到外卖订单管理页面")
+    """静默跳转到外卖订单管理页面，不切换当前标签页"""
+    current_url = driver.current_url
+    target_url = "https://zhst.cmft.com.cn/mgmt/index.html#/report-form/take-out-order-mgmt/OlOrderMgmt"
+    
+    # 如果当前不在目标页面，则静默跳转
+    if not current_url.endswith("OlOrderMgmt"):
+        driver.get(target_url)
+        print("✅ 已静默跳转到外卖订单管理页面")
+    else:
+        print("✅ 已在外卖订单管理页面")
 
 
 def click_query_button():
@@ -133,12 +232,61 @@ def click_export_button():
     )
     driver.execute_script("arguments[0].click();", export_btn)
     print("✅ 点击导出明细按钮完成，开始等待文件下载...")
+    
+    # 处理可能的下载权限弹窗
+    try:
+        # 等待弹窗出现
+        time.sleep(2)
+        
+        # 尝试查找并点击"允许"按钮
+        allow_button = WebDriverWait(driver, 5).until(
+            EC.element_to_be_clickable((By.XPATH, "//button[contains(text(),'允许') or contains(text(),'Allow')]"))
+        )
+        allow_button.click()
+        print("✅ 已自动允许下载权限")
+        time.sleep(1)
+    except:
+        # 如果没有弹窗，继续正常流程
+        print("✅ 无需处理下载权限弹窗")
+
+
+def handle_popups():
+    """处理可能出现的各种弹窗"""
+    try:
+        # 处理下载权限弹窗
+        allow_button = WebDriverWait(driver, 3).until(
+            EC.element_to_be_clickable((By.XPATH, "//button[contains(text(),'允许') or contains(text(),'Allow')]"))
+        )
+        allow_button.click()
+        print("✅ 已处理下载权限弹窗")
+        time.sleep(1)
+        return True
+    except:
+        pass
+    
+    try:
+        # 处理确认弹窗
+        confirm_button = WebDriverWait(driver, 3).until(
+            EC.element_to_be_clickable((By.XPATH, "//button[contains(text(),'确定') or contains(text(),'确认') or contains(text(),'OK')]"))
+        )
+        confirm_button.click()
+        print("✅ 已处理确认弹窗")
+        time.sleep(1)
+        return True
+    except:
+        pass
+    
+    return False
 
 
 def wait_for_new_download(timeout=30):
     before = set(os.listdir(download_dir))
     for _ in range(timeout):
         root.update()
+        
+        # 在处理过程中检查并处理弹窗
+        handle_popups()
+        
         after = set(os.listdir(download_dir))
         new_files = after - before
         for f in new_files:
@@ -148,6 +296,70 @@ def wait_for_new_download(timeout=30):
                 return path
         root.after(1000)
     return None
+
+
+def wait_for_frontend_processing(timeout=300):
+    """等待前端处理完数据"""
+    print("⏳ 等待前端处理数据...")
+    
+    for i in range(timeout):
+        root.update()
+        
+        # 每30秒检查一次前端状态
+        if i % 30 == 0 and i > 0:
+            print(f"⏳ 已等待前端处理 {i} 秒...")
+        
+        # 检查前端是否还在访问数据文件
+        lock_file_path = os.path.join(project_data_dir, "data.lock")
+        if os.path.exists(lock_file_path):
+            try:
+                with open(lock_file_path, 'r') as f:
+                    lock_info = json.load(f)
+                    lock_time = lock_info.get('timestamp', 0)
+                    # 如果锁文件超过60秒，可能是僵尸锁
+                    if time.time() - lock_time > 60:
+                        print("⚠️ 检测到僵尸锁，继续处理")
+                        break
+                    else:
+                        print("🔒 前端正在处理数据，继续等待...")
+                        root.after(1000)
+                        continue
+            except:
+                pass
+        
+        # 如果没有锁文件，说明前端处理完成
+        if not os.path.exists(lock_file_path):
+            print("✅ 前端数据处理完成")
+            break
+            
+        root.after(1000)
+    
+    print("✅ 前端处理等待完成")
+
+
+def create_processing_flag():
+    """创建处理标志，通知前端有新数据"""
+    flag_file = os.path.join(project_data_dir, "new_data_ready.flag")
+    try:
+        with open(flag_file, 'w') as f:
+            json.dump({
+                'timestamp': time.time(),
+                'message': '新数据已准备就绪'
+            }, f)
+        print("🚩 已创建新数据标志，通知前端")
+    except Exception as e:
+        print(f"⚠️ 创建标志文件失败: {e}")
+
+
+def remove_processing_flag():
+    """移除处理标志"""
+    flag_file = os.path.join(project_data_dir, "new_data_ready.flag")
+    try:
+        if os.path.exists(flag_file):
+            os.remove(flag_file)
+            print("🚩 已移除处理标志")
+    except Exception as e:
+        print(f"⚠️ 移除标志文件失败: {e}")
 
 
 def wait_until_unlocked(filepath, timeout=60):
@@ -185,6 +397,15 @@ def wait_until_unlocked(filepath, timeout=60):
 #     print(f"📊 提取出 {len(coffee_df)} 条咖啡订单")
 #     return coffee_df
 
+def get_status_name(status_code):
+    """根据状态代码获取状态名称"""
+    status_map = {
+        '2': '备货中',
+        '5': '已完成'
+    }
+    return status_map.get(str(status_code), f'未知状态({status_code})')
+
+
 def process_excel(file_path):
     df = pd.read_excel(file_path)
     df.columns = [col.strip() for col in df.columns]
@@ -210,10 +431,101 @@ def process_excel(file_path):
     return coffee_df
 
 
+def update_frontend_excel(new_coffee_df):
+    """更新前端专用Excel文件，通过订单号同步"""
+    today_str = datetime.now().strftime("%Y%m%d")
+    frontend_excel_path = os.path.join(project_data_dir, f"{today_str}_前端咖啡订单.xlsx")
+    
+    try:
+        # 获取文件锁
+        if not lock_manager.acquire_lock(timeout=15):
+            print("⚠️ 无法获取文件锁，跳过前端Excel更新")
+            return False
+        
+        try:
+            # 读取现有的前端Excel文件
+            existing_df = None
+            if os.path.exists(frontend_excel_path) and is_valid_xlsx(frontend_excel_path):
+                try:
+                    existing_df = pd.read_excel(frontend_excel_path)
+                    print(f"📄 读取现有前端Excel文件，包含 {len(existing_df)} 条记录")
+                except Exception as e:
+                    print(f"⚠️ 读取现有前端Excel失败: {e}")
+                    existing_df = None
+            
+            # 创建新的DataFrame用于前端
+            frontend_data = []
+            
+            # 处理新数据
+            for _, new_row in new_coffee_df.iterrows():
+                order_id = str(new_row.get('订单编号', ''))
+                
+                # 检查是否已存在
+                existing_row = None
+                if existing_df is not None:
+                    existing_matches = existing_df[existing_df['订单编号'] == order_id]
+                    if not existing_matches.empty:
+                        existing_row = existing_matches.iloc[0]
+                
+                if existing_row is not None:
+                    # 使用现有状态，更新其他信息
+                    existing_status = str(existing_row.get('状态', '2'))
+                    status_name = get_status_name(existing_status)
+                    frontend_row = {
+                        '订单编号': order_id,
+                        '手机号码': str(new_row.get('手机号码', '')),
+                        '姓名': str(new_row.get('姓名', '')),
+                        '部门': str(new_row.get('部门', '')),
+                        '支付时间': str(new_row.get('支付时间', '')),
+                        '订单分类': str(new_row.get('订单分类', '')),
+                        '订单备注': str(new_row.get('订单备注', '')),
+                        '状态': existing_status,  # 保持现有状态
+                        '状态名称': status_name,  # 添加状态名称
+                        '处理时间': str(existing_row.get('处理时间', ''))
+                    }
+                    print(f"🔄 更新订单: {order_id} (保持状态: {status_name})")
+                else:
+                    # 新订单
+                    frontend_row = {
+                        '订单编号': order_id,
+                        '手机号码': str(new_row.get('手机号码', '')),
+                        '姓名': str(new_row.get('姓名', '')),
+                        '部门': str(new_row.get('部门', '')),
+                        '支付时间': str(new_row.get('支付时间', '')),
+                        '订单分类': str(new_row.get('订单分类', '')),
+                        '订单备注': str(new_row.get('订单备注', '')),
+                        '状态': '2',  # 默认备货中状态
+                        '状态名称': '备货中',  # 添加状态名称
+                        '处理时间': ''
+                    }
+                    print(f"🆕 新增订单: {order_id} (状态: 备货中)")
+                
+                frontend_data.append(frontend_row)
+            
+            # 保存到前端Excel文件
+            frontend_df = pd.DataFrame(frontend_data)
+            frontend_df.to_excel(frontend_excel_path, index=False)
+            print(f"✅ 前端Excel文件已更新: {os.path.basename(frontend_excel_path)}")
+            print(f"📊 总订单数: {len(frontend_df)}")
+            
+            return True
+            
+        finally:
+            # 释放文件锁
+            lock_manager.release_lock()
+            
+    except Exception as e:
+        print(f"❌ 更新前端Excel失败: {e}")
+        return False
+
+
 
 def open_excel(path):
-    print(f"📄 打开Excel：{path}")
-    os.startfile(path)
+    """打开Excel文件（已禁用，避免干扰前端用户体验）"""
+    # 注释掉自动打开功能，避免干扰前端用户
+    # print(f"📄 打开Excel：{path}")
+    # os.startfile(path)
+    pass
 
 
 def save_and_close_excel():
@@ -300,47 +612,25 @@ def do_check():
         root.after(30000, do_check)
         return
 
-    existing_order_ids = set()
-    if is_valid_xlsx(coffee_path):
-        try:
-            existing_df = pd.read_excel(coffee_path)
-            if '订单编号' in existing_df.columns:
-                existing_order_ids = set(existing_df['订单编号'].astype(str))
-        except Exception:
-            print(f"⚠️ 无法读取现有咖啡表，将重新创建")
+    # 更新前端专用Excel文件
+    print("🔄 开始更新前端专用Excel文件...")
+    if update_frontend_excel(coffee_df):
+        print("✅ 前端Excel文件更新成功")
+        play_new_sound()  # 播放提示音
     else:
-        print(f"⚠️ 现有咖啡表无效或不存在，将重新创建")
-
-    new_rows = coffee_df[~coffee_df['订单编号'].isin(existing_order_ids)]
-
-    if new_rows.empty:
-        print("✅ 当前没有新增咖啡")
+        print("⚠️ 前端Excel文件更新失败")
         play_no_new_sound()
-    else:
-        print(f"🚨 检测到新增咖啡：{len(new_rows)} 条")
-        play_new_sound()
-        # 移除弹窗提示，只保留声音提示
-        try:
-            save_and_close_excel()
-            wait_until_unlocked(coffee_path, timeout=60)
 
-            if is_valid_xlsx(coffee_path):
-                wb = openpyxl.load_workbook(coffee_path)
-                ws = wb.active
-                ws.append([])
-                for _, row in new_rows.iterrows():
-                    ws.append(row.tolist())
-                wb.save(coffee_path)
-                wb.close()
-            else:
-                coffee_df.to_excel(coffee_path, index=False)
-
-            # 移除自动打开Excel，避免干扰用户工作
-            print(f"✅ 咖啡订单数据已保存到: {os.path.basename(coffee_path)}")
-        except Exception:
-            logging.exception("❌ 写入咖啡Excel时出错")
-
-    root.after(30000, do_check)
+    # 等待前端处理完数据后再进行下一次检查
+    print("⏳ 等待前端处理数据...")
+    wait_for_frontend_processing(timeout=300)  # 最多等待5分钟
+    
+    # 移除处理标志
+    remove_processing_flag()
+    
+    # 延长下次检查间隔，给前端更多处理时间
+    print("🔄 准备进行下一次数据检查...")
+    root.after(60000, do_check)  # 改为60秒间隔
 
 
 def start_program():
@@ -354,8 +644,9 @@ def start_program():
     print("   • 自动监控外卖系统中的咖啡订单")
     print("   • 每30秒检测一次新订单")
     print("   • 自动筛选咖啡类订单")
-    print("   • 声音和弹窗通知")
+    print("   • 声音提示（无弹窗干扰）")
     print("   • 自动管理Excel文件")
+    print("   • 静默运行，不干扰前端用户")
     print("=" * 50)
     
     if is_valid_xlsx(coffee_path):
