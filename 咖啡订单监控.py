@@ -192,10 +192,27 @@ def switch_to_target_tab():
             print(f"✅ 已切换到现有Dashboard标签页: {driver.current_url}")
             return
     
-    # 如果没有找到目标页面，创建新标签页
-    print("🔍 未找到目标页面，创建新标签页...")
+    # 如果没有找到目标页面，创建新标签页并导航到登录页面
+    print("🔍 未找到目标页面，创建新标签页并导航到登录页面...")
     driver.execute_script("window.open('');")
     driver.switch_to.window(driver.window_handles[-1])
+    
+    # 导航到登录页面
+    login_url = "https://zhst.cmft.com.cn/mgmt/index.html#/login?redirect=%2Fmerchant-service%2Fmerchant-mgmt%2FMerchantInfoMgmtNew2"
+    driver.get(login_url)
+    print(f"✅ 已导航到登录页面: {login_url}")
+    
+    # 等待用户登录
+    print("⏳ 等待用户登录...")
+    print("💡 请在浏览器中完成登录，然后输入 '已登录' 继续程序")
+    
+    while True:
+        user_input = input("请输入 '已登录' 继续程序: ").strip()
+        if user_input == "已登录":
+            print("✅ 用户确认已登录，继续程序...")
+            break
+        else:
+            print("❌ 输入错误，请输入 '已登录'")
     
     # 尝试最小化窗口以减少干扰（如果可能）
     try:
@@ -205,10 +222,36 @@ def switch_to_target_tab():
         print("✅ 已创建新标签页用于后台操作")
 
 
+def check_login_status():
+    """检查登录状态"""
+    try:
+        # 检查是否在登录页面
+        if "login" in driver.current_url.lower():
+            print("⚠️ 检测到仍在登录页面，请先完成登录")
+            return False
+        
+        # 检查是否有登录相关的元素
+        login_elements = driver.find_elements(By.XPATH, "//input[@type='password'] | //button[contains(text(),'登录')]")
+        if login_elements:
+            print("⚠️ 检测到登录表单，请先完成登录")
+            return False
+        
+        print("✅ 登录状态检查通过")
+        return True
+    except Exception as e:
+        print(f"⚠️ 登录状态检查失败: {e}")
+        return False
+
+
 def click_waimai_menu():
     """静默跳转到外卖订单管理页面，不切换当前标签页"""
     current_url = driver.current_url
     target_url = "https://zhst.cmft.com.cn/mgmt/index.html#/report-form/take-out-order-mgmt/OlOrderMgmt"
+    
+    # 检查登录状态
+    if not check_login_status():
+        print("❌ 登录状态检查失败，无法继续")
+        return False
     
     # 如果当前不在目标页面，则静默跳转
     if not current_url.endswith("OlOrderMgmt"):
@@ -216,6 +259,8 @@ def click_waimai_menu():
         print("✅ 已静默跳转到外卖订单管理页面")
     else:
         print("✅ 已在外卖订单管理页面")
+    
+    return True
 
 
 def click_query_button():
@@ -581,7 +626,10 @@ def do_check():
 
     try:
         switch_to_target_tab()
-        click_waimai_menu()
+        if not click_waimai_menu():
+            print("❌ 登录状态检查失败，等待用户登录...")
+            root.after(60000, do_check)  # 1分钟后重试
+            return
         click_query_button()
         click_export_button()
     except Exception as e:
