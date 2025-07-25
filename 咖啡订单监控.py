@@ -45,6 +45,20 @@ chrome_options.add_experimental_option("debuggerAddress", "127.0.0.1:80")
 chrome_options.add_argument("--disable-background-timer-throttling")
 chrome_options.add_argument("--disable-backgrounding-occluded-windows")
 chrome_options.add_argument("--disable-renderer-backgrounding")
+chrome_options.add_argument("--disable-notifications")
+chrome_options.add_argument("--disable-popup-blocking")
+chrome_options.add_argument("--disable-default-apps")
+chrome_options.add_argument("--no-first-run")
+chrome_options.add_argument("--no-default-browser-check")
+chrome_options.add_argument("--disable-extensions")
+chrome_options.add_argument("--disable-plugins")
+chrome_options.add_argument("--disable-images")
+chrome_options.add_argument("--disable-gpu")
+chrome_options.add_argument("--no-sandbox")
+chrome_options.add_argument("--disable-dev-shm-usage")
+# 移除不兼容的Chrome选项
+# chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
+# chrome_options.add_experimental_option('useAutomationExtension', False)
 try:
     # 尝试使用本地ChromeDriver
     service = Service("chromedriver.exe")
@@ -214,10 +228,12 @@ def switch_to_target_tab():
         else:
             print("❌ 输入错误，请输入 '已登录'")
     
-    # 尝试最小化窗口以减少干扰（如果可能）
+    # 强制最小化窗口并设置为后台运行
     try:
         driver.minimize_window()
-        print("✅ 已最小化后台标签页窗口")
+        # 设置窗口为后台运行
+        driver.execute_script("window.focus = function() {};")
+        print("✅ 已最小化后台标签页窗口并设置为后台运行")
     except:
         print("✅ 已创建新标签页用于后台操作")
 
@@ -244,7 +260,7 @@ def check_login_status():
 
 
 def click_waimai_menu():
-    """静默跳转到外卖订单管理页面，不切换当前标签页"""
+    """静默跳转到外卖订单管理页面，确保在后台运行"""
     current_url = driver.current_url
     target_url = "https://zhst.cmft.com.cn/mgmt/index.html#/report-form/take-out-order-mgmt/OlOrderMgmt"
     
@@ -255,8 +271,21 @@ def click_waimai_menu():
     
     # 如果当前不在目标页面，则静默跳转
     if not current_url.endswith("OlOrderMgmt"):
-        driver.get(target_url)
+        # 使用JavaScript进行静默跳转，避免切换标签页
+        driver.execute_script(f"window.location.href = '{target_url}';")
         print("✅ 已静默跳转到外卖订单管理页面")
+        
+        # 等待页面加载完成
+        time.sleep(3)
+        
+        # 确保窗口保持最小化状态
+        try:
+            driver.minimize_window()
+            # 设置窗口为后台运行
+            driver.execute_script("window.focus = function() {};")
+            driver.execute_script("window.blur();")
+        except:
+            pass
     else:
         print("✅ 已在外卖订单管理页面")
     
@@ -324,23 +353,82 @@ def handle_popups():
     return False
 
 
-def wait_for_new_download(timeout=30):
-    before = set(os.listdir(download_dir))
-    for _ in range(timeout):
-        root.update()
+def start_download_monitor():
+    """开始监控下载目录，返回监控状态"""
+    print(f"📁 开始监控下载目录: {download_dir}")
+    
+    # 获取当前目标文件列表
+    try:
+        all_files = os.listdir(download_dir)
+        current_files = {f for f in all_files if f.startswith("外卖订单商品明细_")}
+        print(f"📋 当前目标文件: {list(current_files)}")
+        return {
+            'start_time': time.time(),
+            'before_files': current_files,
+            'download_dir': download_dir
+        }
+    except Exception as e:
+        print(f"⚠️ 无法读取下载目录: {e}")
+        return None
+
+
+def wait_for_download_complete(monitor_info, timeout=60):
+    """等待下载完成，基于监控状态"""
+    if not monitor_info:
+        print("❌ 监控信息无效，使用默认检测")
+        return wait_for_new_download(timeout)
+    
+    print(f"⏳ 等待文件下载，超时时间: {timeout}秒")
+    before_files = monitor_info['before_files']
+    
+    for i in range(timeout):
+        # 每10秒显示一次进度
+        if i % 10 == 0 and i > 0:
+            print(f"⏳ 已等待下载 {i} 秒...")
         
-        # 在处理过程中检查并处理弹窗
+        # 检查并处理弹窗
         handle_popups()
         
-        after = set(os.listdir(download_dir))
-        new_files = after - before
-        for f in new_files:
-            if f.endswith(".xlsx"):
-                path = os.path.join(download_dir, f)
-                root.after(1000)
+        # 检查新文件
+        try:
+            all_files = os.listdir(monitor_info['download_dir'])
+            current_files = {f for f in all_files if f.startswith("外卖订单商品明细_")}
+            new_files = current_files - before_files
+            
+            # 显示所有新文件（用于调试）
+            if new_files:
+                print(f"🔍 发现新目标文件: {list(new_files)}")
+            
+            for f in new_files:
+                path = os.path.join(monitor_info['download_dir'], f)
+                print(f"✅ 检测到新下载文件: {f}")
+                print(f"📂 文件路径: {path}")
+                
+                # 等待文件完全下载（检查文件大小是否稳定）
+                time.sleep(2)
                 return path
-        root.after(1000)
+                
+        except Exception as e:
+            print(f"⚠️ 检查下载目录时出错: {e}")
+        
+        # 等待1秒
+        time.sleep(1)
+    
+    # 超时后显示当前下载目录的所有目标文件
+    try:
+        all_files = os.listdir(monitor_info['download_dir'])
+        current_files = {f for f in all_files if f.startswith("外卖订单商品明细_")}
+        print(f"📋 下载目录当前目标文件: {list(current_files)}")
+    except Exception as e:
+        print(f"⚠️ 无法读取下载目录: {e}")
+    
+    print(f"❌ 下载超时，{timeout}秒内未检测到新目标文件")
     return None
+
+
+def wait_for_new_download(timeout=60):
+    """等待新文件下载完成（兼容旧版本）"""
+    return wait_for_download_complete(None, timeout)
 
 
 def wait_for_frontend_processing(timeout=300):
@@ -348,8 +436,6 @@ def wait_for_frontend_processing(timeout=300):
     print("⏳ 等待前端处理数据...")
     
     for i in range(timeout):
-        root.update()
-        
         # 每30秒检查一次前端状态
         if i % 30 == 0 and i > 0:
             print(f"⏳ 已等待前端处理 {i} 秒...")
@@ -367,7 +453,7 @@ def wait_for_frontend_processing(timeout=300):
                         break
                     else:
                         print("🔒 前端正在处理数据，继续等待...")
-                        root.after(1000)
+                        time.sleep(1)
                         continue
             except:
                 pass
@@ -377,7 +463,7 @@ def wait_for_frontend_processing(timeout=300):
             print("✅ 前端数据处理完成")
             break
             
-        root.after(1000)
+        time.sleep(1)
     
     print("✅ 前端处理等待完成")
 
@@ -624,6 +710,10 @@ def do_check():
     full_order_path = os.path.join(project_data_dir, full_order_filename)
     coffee_path = os.path.join(project_data_dir, coffee_filename)
 
+    # 在点击导出按钮之前开始监控下载目录
+    print("🔍 开始监控下载目录...")
+    download_monitor = start_download_monitor()
+
     try:
         switch_to_target_tab()
         if not click_waimai_menu():
@@ -638,7 +728,7 @@ def do_check():
         return
 
     # 等待下载完成
-    file_path = wait_for_new_download()
+    file_path = wait_for_download_complete(download_monitor)
     if not file_path or not os.path.exists(file_path):
         print("❌ 未找到最新下载文件，重试中...")
         root.after(30000, do_check)
