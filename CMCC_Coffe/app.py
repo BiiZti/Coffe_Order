@@ -203,9 +203,18 @@ def read_excel_orders():
                 if pd.isna(order_number):
                     continue
                 
-                # 检查是否有前端操作记录
-                has_frontend_operation = valid_order_id in frontend_operations
-                frontend_operation = frontend_operations.get(valid_order_id)
+                # 使用订单编号查找现有订单，而不是依赖ID
+                existing_order_by_number = next((o for o in old_orders_db if o['number'] == str(order_number)), None)
+                
+                # 检查是否有前端操作记录（基于订单编号）
+                has_frontend_operation = str(order_number) in [str(op_id) for op_id in frontend_operations.keys()]
+                frontend_operation = None
+                if has_frontend_operation:
+                    # 找到对应的操作记录
+                    for op_id, op_data in frontend_operations.items():
+                        if str(op_id) == str(order_number):
+                            frontend_operation = op_data
+                            break
                 
                 # 获取订单状态
                 status_text = str(row.get('订单状态', '备货中'))
@@ -225,8 +234,18 @@ def read_excel_orders():
                     else:
                         status_name = '备货中'
                 
+                # 如果是现有订单，使用原有ID；否则分配新ID
+                if existing_order_by_number:
+                    order_id = existing_order_by_number['id']
+                else:
+                    # 为新订单分配ID
+                    if old_orders_db:
+                        order_id = max(o['id'] for o in old_orders_db) + 1
+                    else:
+                        order_id = 1
+                
                 order = {
-                    'id': valid_order_id,
+                    'id': order_id,
                     'number': str(order_number),
                     'status': status_name,  # 使用状态名称而不是代码
                     'userName': str(row.get('姓名', '未知')),
@@ -234,6 +253,7 @@ def read_excel_orders():
                     'address': str(row.get('部门', '未知')),
                     'amount': 0.0,  # 前端Excel中没有金额字段
                     'orderTime': str(row.get('支付时间', datetime.now().isoformat())),
+                    'remark': str(row.get('订单备注', 'nan')),
                     'dishes': []
                 }
                 
@@ -250,16 +270,15 @@ def read_excel_orders():
                 
                 # 如果有前端操作记录，检查是否需要保护前端操作
                 if has_frontend_operation and frontend_operation:
-                    # 查找旧订单数据中的状态
-                    existing_order = next((o for o in old_orders_db if o['id'] == valid_order_id), None)
-                    if existing_order:
+                    # 使用订单编号查找现有订单
+                    if existing_order_by_number:
                         excel_status = order['status']
-                        current_status = existing_order['status']
+                        current_status = existing_order_by_number['status']
                         expected_status = frontend_operation['new_status']
                         
                         # 如果Excel状态与期望的前端状态不同，保持前端状态
                         if excel_status != expected_status:
-                            print(f"🛡️  订单{valid_order_id}前端操作保护: Excel={excel_status}, 期望={expected_status}, 保持前端状态")
+                            print(f"🛡️  订单{order_number}前端操作保护: Excel={excel_status}, 期望={expected_status}, 保持前端状态")
                             order['status'] = expected_status
                         else:
                             # 状态一致，但不要立即清除前端操作记录，等待一段时间
@@ -268,35 +287,35 @@ def read_excel_orders():
                             
                             # 如果前端操作时间超过5分钟，才清除记录
                             if time_diff.total_seconds() > 300:  # 5分钟
-                                del frontend_operations[valid_order_id]
-                                print(f"✅ 订单{valid_order_id}状态同步且操作时间超过5分钟，清除前端操作记录")
+                                del frontend_operations[str(order_number)]
+                                print(f"✅ 订单{order_number}状态同步且操作时间超过5分钟，清除前端操作记录")
                             else:
-                                print(f"⏳ 订单{valid_order_id}状态同步，但操作时间较短({time_diff.total_seconds():.0f}秒)，保持保护")
+                                print(f"⏳ 订单{order_number}状态同步，但操作时间较短({time_diff.total_seconds():.0f}秒)，保持保护")
                     else:
                         # 新订单，清除前端操作记录
-                        del frontend_operations[valid_order_id]
-                        print(f"✅ 新订单{valid_order_id}，清除前端操作记录")
+                        if str(order_number) in frontend_operations:
+                            del frontend_operations[str(order_number)]
+                        print(f"✅ 新订单{order_number}，清除前端操作记录")
                 else:
                     # 没有前端操作记录，检查是否需要保护现有状态
-                    existing_order = next((o for o in old_orders_db if o['id'] == valid_order_id), None)
-                    if existing_order:
+                    if existing_order_by_number:
                         excel_status = order['status']
-                        current_status = existing_order['status']
+                        current_status = existing_order_by_number['status']
                         
                         # 如果现有订单状态与Excel状态不同，保持现有状态
                         if excel_status != current_status:
-                            print(f"🛡️  订单{valid_order_id}状态保护: Excel={excel_status}, 内存={current_status}, 保持内存状态")
+                            print(f"🛡️  订单{order_number}状态保护: Excel={excel_status}, 内存={current_status}, 保持内存状态")
                             order['status'] = current_status
                             
                             # 如果状态被保护，重新记录前端操作
-                            if valid_order_id not in frontend_operations:
-                                frontend_operations[valid_order_id] = {
+                            if str(order_number) not in frontend_operations:
+                                frontend_operations[str(order_number)] = {
                                     'timestamp': datetime.now(),
                                     'old_status': excel_status,
                                     'new_status': current_status,
                                     'protected': True
                                 }
-                                print(f"📝 重新记录保护操作: 订单{valid_order_id} {excel_status}→{current_status}")
+                                print(f"📝 重新记录保护操作: 订单{order_number} {excel_status}→{current_status}")
                 
                 orders_db.append(order)
                 valid_order_id += 1
@@ -359,39 +378,66 @@ def update_order_status(order_id, new_status):
     """更新订单状态"""
     global orders_db, frontend_operations, is_excel_updating
     
+    print(f"🔍 开始更新订单状态: order_id={order_id} (类型: {type(order_id)}), new_status={new_status}")
+    
     # 检查Excel是否正在被外部程序更新
     if is_excel_updating:
         print(f"⚠️  订单{order_id}状态更新被拒绝：咖啡订单Excel文件正在被外部程序更新")
         return False, "系统繁忙，请稍后再试"
     
-    # 更新订单状态
+    # 首先尝试通过订单编号查找（因为前端现在传递的是订单编号）
+    print(f"🔍 通过订单编号查找: {order_id}")
     for order in orders_db:
-        if order['id'] == order_id:
+        if str(order['number']) == str(order_id):
             old_status = order['status']
             order['status'] = new_status
-            # 记录前端操作时间戳和旧状态
-            frontend_operations[order_id] = {
+            # 记录前端操作时间戳和旧状态（使用订单编号作为键）
+            frontend_operations[str(order['number'])] = {
                 'timestamp': datetime.now(),
                 'old_status': old_status,
                 'new_status': new_status
             }
-            print(f"📝 记录前端操作: 订单{order_id} {old_status}→{new_status}")
+            print(f"📝 记录前端操作: 订单{order['number']} {old_status}→{new_status}")
             # 同步更新Excel文件
-            update_excel_order_status(order_id, new_status)
+            update_excel_order_status_by_number(order['number'], new_status)
+            print(f"📝 调用update_excel_order_status_by_number: order_number={order['number']}, new_status={new_status}")
             return True, "操作成功"
+    
+    # 如果通过订单编号没找到，尝试通过ID查找（向后兼容）
+    print(f"🔍 通过订单编号未找到，尝试通过ID查找: {order_id}")
+    try:
+        order_id_int = int(order_id)
+        for order in orders_db:
+            if order['id'] == order_id_int:
+                old_status = order['status']
+                order['status'] = new_status
+                # 记录前端操作时间戳和旧状态（使用订单编号作为键）
+                frontend_operations[str(order['number'])] = {
+                    'timestamp': datetime.now(),
+                    'old_status': old_status,
+                    'new_status': new_status
+                }
+                print(f"📝 记录前端操作: 订单{order['number']} {old_status}→{new_status}")
+                # 同步更新Excel文件
+                update_excel_order_status_by_number(order['number'], new_status)
+                return True, "操作成功"
+    except ValueError:
+        print(f"❌ order_id '{order_id}' 无法转换为整数")
+    
+    print(f"❌ 未找到订单: {order_id}")
     return False, "订单不存在"
 
-def update_excel_order_status(order_id, new_status):
-    """更新咖啡订单Excel文件中的订单状态"""
+def update_excel_order_status_by_number(order_number, new_status):
+    """通过订单编号更新咖啡订单Excel文件中的订单状态"""
     try:
         # 查找最新的咖啡订单Excel文件
         excel_files = glob.glob(os.path.join(EXCEL_FOLDER, EXCEL_PATTERN))
         if not excel_files:
-            print("未找到咖啡订单Excel文件，无法更新状态")
+            print("❌ 未找到咖啡订单Excel文件，无法更新状态")
             return False
         
         latest_file = max(excel_files, key=os.path.getctime)
-        print(f"更新咖啡订单Excel文件: {latest_file}")
+        print(f"📁 更新咖啡订单Excel文件: {latest_file}")
         
         # 检查文件是否可写
         if not os.access(latest_file, os.W_OK):
@@ -403,59 +449,85 @@ def update_excel_order_status(order_id, new_status):
             print(f"   3. 以管理员身份运行程序")
             return False
         
-        # 使用openpyxl加载工作簿
+        # 先读取Excel文件，找到对应的订单
+        df = pd.read_excel(latest_file, engine='openpyxl')
+        print(f"📊 Excel文件包含 {len(df)} 行数据")
+        
+        print(f"🎯 目标订单编号: {order_number}")
+        
+        # 在Excel中查找对应的行
+        target_row_index = None
+        for index, row in df.iterrows():
+            excel_order_number = row.get('订单编号')
+            if not pd.isna(excel_order_number) and str(excel_order_number) == str(order_number):
+                target_row_index = index
+                break
+        
+        if target_row_index is None:
+            print(f"❌ 在Excel中未找到订单号 {order_number}")
+            return False
+        
+        excel_row_number = target_row_index + 2  # +2 因为Excel从1开始且有标题行
+        print(f"🔍 订单 {order_number} 在Excel第 {excel_row_number} 行")
+        
+        # 打印Excel中的所有订单，用于调试
+        print(f"📋 Excel中的订单:")
+        for index, row in df.iterrows():
+            excel_order_number = row.get('订单编号')
+            if not pd.isna(excel_order_number):
+                print(f"   行{index+2}: {excel_order_number}")
+        
+        # 使用openpyxl加载工作簿进行更新
         workbook = load_workbook(latest_file)
         worksheet = workbook.active
         
-        # 找到对应的订单行（需要跳过空行）
-        df = pd.read_excel(latest_file, engine='openpyxl')
-        valid_rows = []
-        
-        for index, row in df.iterrows():
-            order_number = row.get('订单编号')
-            if not pd.isna(order_number):
-                valid_rows.append(index + 2)  # +2 因为Excel从1开始且有标题行
-        
-        if order_id <= len(valid_rows):
-            row_number = valid_rows[order_id - 1]  # 订单ID从1开始，转换为0基索引
-            print(f"🔍 订单ID {order_id} 映射到Excel行号 {row_number}")
+        # 处理状态更新
+        if isinstance(new_status, str):
+            status_text = new_status
         else:
-            print(f"订单ID {order_id} 超出有效订单范围")
-            return False
+            status_mapping = {
+                PENDING: '备货中',
+                COMPLETED: '已完成'
+            }
+            status_text = status_mapping.get(new_status, '备货中')
         
-        if row_number <= worksheet.max_row:
-            # 处理状态更新
-            if isinstance(new_status, str):
-                # 如果是字符串状态，直接使用
-                status_text = new_status
-            else:
-                # 如果是数字状态，进行映射
-                status_mapping = {
-                    PENDING: '备货中',
-                    COMPLETED: '已完成'
-                }
-                status_text = status_mapping.get(new_status, '备货中')
-            
-            print(f"🔧 更新Excel: 订单{order_id}, 状态{new_status} -> 文本状态'{status_text}'")
-            
-            # 更新状态列（状态名称是第9列，I列）
-            status_cell = worksheet.cell(row=row_number, column=9)
-            status_cell.value = status_text
-            
-            # 同时更新状态代码列（状态是第8列，H列）
-            status_code_cell = worksheet.cell(row=row_number, column=8)
-            if status_text == '已完成':
-                status_code_cell.value = '5'
-            else:
-                status_code_cell.value = '2'
-            
-            # 保存文件
-            workbook.save(latest_file)
-            print(f"✅ 成功更新咖啡订单Excel文件，订单{order_id}状态改为{status_text}")
-            return True
+        print(f"🔧 更新Excel: 订单{order_number}, 状态{new_status} -> 文本状态'{status_text}'")
+        
+        # 更新状态列（状态名称是第9列，I列）
+        status_cell = worksheet.cell(row=excel_row_number, column=9)
+        status_cell.value = status_text
+        
+        # 同时更新状态代码列（状态是第8列，H列）
+        status_code_cell = worksheet.cell(row=excel_row_number, column=8)
+        if status_text == '已完成':
+            status_code_cell.value = '5'
         else:
-            print(f"订单ID {order_id} 超出咖啡订单Excel文件范围")
-            return False
+            status_code_cell.value = '2'
+        
+        # 保存文件
+        print(f"💾 正在保存文件: {latest_file}")
+        workbook.save(latest_file)
+        
+        # 验证文件是否真的被更新了
+        print(f"🔍 验证文件更新...")
+        verification_df = pd.read_excel(latest_file, engine='openpyxl')
+        verification_row = verification_df.iloc[target_row_index]
+        actual_status = verification_row.get('状态名称', 'N/A')
+        actual_status_code = verification_row.get('状态', 'N/A')
+        
+        print(f"📊 验证结果:")
+        print(f"   期望状态: {status_text}")
+        print(f"   实际状态: {actual_status}")
+        print(f"   期望状态码: {'5' if status_text == '已完成' else '2'}")
+        print(f"   实际状态码: {actual_status_code}")
+        
+        if actual_status == status_text:
+            print(f"✅ 文件更新验证成功！")
+        else:
+            print(f"❌ 文件更新验证失败！状态未正确更新")
+        
+        print(f"✅ 成功更新咖啡订单Excel文件，订单{order_number}状态改为{status_text}")
+        return True
             
     except PermissionError as e:
         print(f"❌ 咖啡订单Excel文件权限错误: {e}")
@@ -463,6 +535,135 @@ def update_excel_order_status(order_id, new_status):
         return False
     except Exception as e:
         print(f"❌ 更新咖啡订单Excel文件时出错: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
+
+def update_excel_order_status(order_id, new_status):
+    """更新咖啡订单Excel文件中的订单状态"""
+    try:
+        # 查找最新的咖啡订单Excel文件
+        excel_files = glob.glob(os.path.join(EXCEL_FOLDER, EXCEL_PATTERN))
+        if not excel_files:
+            print("❌ 未找到咖啡订单Excel文件，无法更新状态")
+            return False
+        
+        latest_file = max(excel_files, key=os.path.getctime)
+        print(f"📁 更新咖啡订单Excel文件: {latest_file}")
+        
+        # 检查文件是否可写
+        if not os.access(latest_file, os.W_OK):
+            print(f"⚠️  咖啡订单Excel文件无写入权限，请检查文件是否被占用或设置为只读")
+            print(f"   文件路径: {latest_file}")
+            print(f"   建议操作:")
+            print(f"   1. 关闭可能打开该文件的Excel程序")
+            print(f"   2. 右键文件 -> 属性 -> 取消勾选'只读'")
+            print(f"   3. 以管理员身份运行程序")
+            return False
+        
+        # 先读取Excel文件，找到对应的订单
+        df = pd.read_excel(latest_file, engine='openpyxl')
+        print(f"📊 Excel文件包含 {len(df)} 行数据")
+        
+        # 找到对应的订单（通过order_id在orders_db中的索引）
+        if order_id <= 0 or order_id > len(orders_db):
+            print(f"❌ 订单ID {order_id} 超出orders_db范围 (1-{len(orders_db)})")
+            return False
+        
+        target_order = orders_db[order_id - 1]  # order_id从1开始，转换为0基索引
+        target_order_number = target_order['number']
+        print(f"🎯 目标订单: {target_order_number} (ID: {order_id})")
+        
+        # 验证目标订单是否正确
+        print(f"🔍 验证目标订单: 期望更新订单编号 {target_order_number}")
+        
+        # 打印orders_db中的所有订单，用于调试
+        print(f"📋 orders_db中的订单:")
+        for i, order in enumerate(orders_db):
+            print(f"   ID {i+1}: {order['number']} - {order['status']}")
+        
+        # 在Excel中查找对应的行
+        target_row_index = None
+        for index, row in df.iterrows():
+            excel_order_number = row.get('订单编号')
+            if not pd.isna(excel_order_number) and str(excel_order_number) == str(target_order_number):
+                target_row_index = index
+                break
+        
+        if target_row_index is None:
+            print(f"❌ 在Excel中未找到订单号 {target_order_number}")
+            return False
+        
+        excel_row_number = target_row_index + 2  # +2 因为Excel从1开始且有标题行
+        print(f"🔍 订单 {target_order_number} 在Excel第 {excel_row_number} 行")
+        
+        # 打印Excel中的所有订单，用于调试
+        print(f"📋 Excel中的订单:")
+        for index, row in df.iterrows():
+            excel_order_number = row.get('订单编号')
+            if not pd.isna(excel_order_number):
+                print(f"   行{index+2}: {excel_order_number}")
+        
+        # 使用openpyxl加载工作簿进行更新
+        workbook = load_workbook(latest_file)
+        worksheet = workbook.active
+        
+        # 处理状态更新
+        if isinstance(new_status, str):
+            status_text = new_status
+        else:
+            status_mapping = {
+                PENDING: '备货中',
+                COMPLETED: '已完成'
+            }
+            status_text = status_mapping.get(new_status, '备货中')
+        
+        print(f"🔧 更新Excel: 订单{target_order_number}, 状态{new_status} -> 文本状态'{status_text}'")
+        
+        # 更新状态列（状态名称是第9列，I列）
+        status_cell = worksheet.cell(row=excel_row_number, column=9)
+        status_cell.value = status_text
+        
+        # 同时更新状态代码列（状态是第8列，H列）
+        status_code_cell = worksheet.cell(row=excel_row_number, column=8)
+        if status_text == '已完成':
+            status_code_cell.value = '5'
+        else:
+            status_code_cell.value = '2'
+        
+        # 保存文件
+        print(f"💾 正在保存文件: {latest_file}")
+        workbook.save(latest_file)
+        
+        # 验证文件是否真的被更新了
+        print(f"🔍 验证文件更新...")
+        verification_df = pd.read_excel(latest_file, engine='openpyxl')
+        verification_row = verification_df.iloc[target_row_index]
+        actual_status = verification_row.get('状态名称', 'N/A')
+        actual_status_code = verification_row.get('状态', 'N/A')
+        
+        print(f"📊 验证结果:")
+        print(f"   期望状态: {status_text}")
+        print(f"   实际状态: {actual_status}")
+        print(f"   期望状态码: {'5' if status_text == '已完成' else '2'}")
+        print(f"   实际状态码: {actual_status_code}")
+        
+        if actual_status == status_text:
+            print(f"✅ 文件更新验证成功！")
+        else:
+            print(f"❌ 文件更新验证失败！状态未正确更新")
+        
+        print(f"✅ 成功更新咖啡订单Excel文件，订单{target_order_number}状态改为{status_text}")
+        return True
+            
+    except PermissionError as e:
+        print(f"❌ 咖啡订单Excel文件权限错误: {e}")
+        print(f"   请确保Excel文件未被其他程序打开，且具有写入权限")
+        return False
+    except Exception as e:
+        print(f"❌ 更新咖啡订单Excel文件时出错: {e}")
+        import traceback
+        traceback.print_exc()
         return False
 
 # Flask路由定义
@@ -490,27 +691,39 @@ def api_all_orders():
         'data': orders_db
     })
 
-@app.route('/api/order/<int:order_id>/<action>', methods=['POST'])
+@app.route('/api/order/<order_id>/<action>', methods=['POST'])
 def api_update_order(order_id, action):
     """更新订单状态"""
+    print(f"🔔 收到API请求: 订单{order_id}, 动作: {action}")
     try:
         if action == 'complete':
+            print(f"🔄 开始处理完成订单请求: 订单{order_id}")
             success, message = update_order_status(order_id, '已完成')
+            print(f"📊 处理结果: 成功={success}, 消息={message}")
+            
             if success:
-                return jsonify({
+                response_data = {
                     'code': 1, 
                     'msg': f'{message}，咖啡订单Excel文件已同步更新'
-                })
+                }
+                print(f"✅ 返回成功响应: {response_data}")
+                return jsonify(response_data)
             else:
-                return jsonify({
+                response_data = {
                     'code': 0, 
                     'msg': message
-                })
+                }
+                print(f"❌ 返回失败响应: {response_data}")
+                return jsonify(response_data)
 
         else:
+            print(f"❌ 无效的操作: {action}")
             return jsonify({'code': 0, 'msg': '无效的操作'})
             
     except Exception as e:
+        print(f"💥 API处理异常: {e}")
+        import traceback
+        traceback.print_exc()
         return jsonify({'code': 0, 'msg': f'操作失败: {str(e)}'})
 
 @app.route('/api/statistics')

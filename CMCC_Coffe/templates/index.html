@@ -747,12 +747,13 @@
                             <th>地址</th>
                             <th>下单时间</th>
                             <th>实收金额</th>
+                            <th>订单备注</th>
                             <th>操作</th>
                         </tr>
                     </thead>
                     <tbody id="orders-tbody">
                         <tr>
-                            <td colspan="8">
+                            <td colspan="10">
             <div class="loading">
                 <div class="spinner"></div>
                 <p>正在加载订单...</p>
@@ -971,7 +972,8 @@
                     <td title="${order.address || '未知'}">${(order.address || '未知').length > 20 ? (order.address || '未知').substring(0, 20) + '...' : (order.address || '未知')}</td>
                     <td>${orderTime}</td>
                     <td>¥${order.amount}</td>
-                    <td>${getActionButtons(order.status, order.id)}</td>
+                    <td title="${order.remark || 'nan'}">${order.remark || 'nan'}</td>
+                    <td>${getActionButtons(order.status, order.number)}</td>
                 </tr>
             `;
         }
@@ -1013,22 +1015,28 @@
         function getActionButtons(status, orderId) {
             let buttons = '';
             
+            console.log(`🔧 生成按钮: status=${status}, orderId=${orderId} (类型: ${typeof orderId})`);
+            
+            // 确保orderId是字符串，并且正确转义
+            const safeOrderId = String(orderId).replace(/'/g, "\\'");
+            
             // 处理字符串状态
             if (typeof status === 'string') {
                 if (status === '备货中' || status === '待接单') {
                 buttons += `
-                        <button class="btn btn-secondary" onclick="updateOrder(${orderId}, 'complete')">完成订单</button>
+                        <button class="btn btn-secondary" onclick="updateOrder('${safeOrderId}', 'complete')">完成订单</button>
                 `;
                 }
             } else {
                 // 兼容数字状态（向后兼容）
                 if (status === 2) { // 备货中
                 buttons += `
-                        <button class="btn btn-secondary" onclick="updateOrder(${orderId}, 'complete')">完成订单</button>
+                        <button class="btn btn-secondary" onclick="updateOrder('${safeOrderId}', 'complete')">完成订单</button>
                 `;
                 }
             }
             
+            console.log(`🔧 生成的按钮HTML: ${buttons}`);
             return buttons;
         }
 
@@ -1037,16 +1045,25 @@
                 'complete': '完成订单'
             }[action];
 
-            // 直接执行操作，不需要确认对话框
+            console.log(`🔄 开始执行操作: 订单${orderId}, 动作: ${action}`);
+            showNotification(`正在处理订单${orderId}...`);
 
+            // 直接执行操作，不需要确认对话框
             fetch(`/api/order/${orderId}/${action}`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json'
                 }
             })
-            .then(response => response.json())
+            .then(response => {
+                console.log(`📡 服务器响应状态: ${response.status}`);
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                return response.json();
+            })
             .then(data => {
+                console.log(`📊 服务器返回数据:`, data);
                 if (data.code === 1) {
                     showNotification(`${actionText}成功！Excel文件已同步更新`);
                     loadOrders(); // 刷新订单列表
@@ -1055,8 +1072,8 @@
                 }
             })
             .catch(error => {
-                console.error('Error:', error);
-                showError('操作失败');
+                console.error('❌ 操作失败:', error);
+                showError(`操作失败: ${error.message}`);
             });
         }
 
