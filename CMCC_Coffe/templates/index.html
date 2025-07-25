@@ -1,0 +1,1196 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CMCC Coffee - 订单管理系统</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Microsoft YaHei', Arial, sans-serif;
+            background: #f5f5f5;
+            color: #333;
+        }
+
+        /* 顶部导航栏 */
+        .top-header {
+            background: white;
+            height: 60px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            z-index: 1000;
+        }
+
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .logo-text {
+            font-size: 20px;
+            font-weight: bold;
+        }
+
+        .logo-text .chinese {
+            color: #ff6b35;
+        }
+
+        .logo-text .english {
+            color: #333;
+            font-size: 16px;
+        }
+
+        .status-indicator {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .business-status {
+            background: #ff6b35;
+            color: white;
+            padding: 8px 16px;
+            border-radius: 20px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-weight: bold;
+            transition: all 0.3s ease;
+        }
+
+        .business-status.closed {
+            background: #6c757d;
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            background: #28a745;
+            border-radius: 50%;
+            animation: pulse 2s infinite;
+        }
+
+        .status-dot.closed {
+            background: #dc3545;
+            animation: none;
+        }
+
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.5; }
+            100% { opacity: 1; }
+        }
+
+        .user-menu {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+
+        .settings-dropdown {
+            position: relative;
+        }
+
+        .settings-btn {
+            background: none;
+            border: none;
+            color: #666;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            padding: 8px;
+            border-radius: 4px;
+            transition: background 0.3s;
+        }
+
+        .settings-btn:hover {
+            background: #f0f0f0;
+        }
+
+        .settings-menu {
+            position: absolute;
+            top: 100%;
+            right: 0;
+            background: white;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            min-width: 150px;
+            z-index: 1000;
+            display: none;
+            overflow: hidden;
+        }
+
+        .settings-menu.show {
+            display: block;
+        }
+
+        .settings-item {
+            padding: 12px 16px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            transition: background 0.3s;
+            border-bottom: 1px solid #f0f0f0;
+        }
+
+        .settings-item:last-child {
+            border-bottom: none;
+        }
+
+        .settings-item:hover {
+            background: #f8f9fa;
+        }
+
+        .settings-item i {
+            width: 16px;
+            color: #666;
+        }
+
+        .settings-item:first-child i {
+            color: #28a745;
+        }
+
+        .settings-item:last-child i {
+            color: #dc3545;
+        }
+
+        .admin-dropdown {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            cursor: pointer;
+            padding: 8px;
+            border-radius: 4px;
+            transition: background 0.3s;
+        }
+
+        .admin-dropdown:hover {
+            background: #f0f0f0;
+        }
+
+        /* 侧边栏 */
+        .sidebar {
+            position: fixed;
+            left: 0;
+            top: 60px;
+            width: 200px;
+            height: calc(100vh - 60px);
+            background: #2c3e50;
+            color: white;
+            overflow-y: auto;
+            z-index: 999;
+        }
+
+        .nav-menu {
+            list-style: none;
+            padding: 20px 0;
+            }
+
+        .nav-item {
+            margin-bottom: 5px;
+        }
+
+        .nav-link {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 12px 20px;
+            color: #bdc3c7;
+            text-decoration: none;
+            transition: all 0.3s;
+            border-left: 3px solid transparent;
+        }
+
+        .nav-link:hover {
+            background: #34495e;
+            color: white;
+        }
+
+        .nav-link.active {
+            background: #34495e;
+            color: white;
+            border-left-color: #ff6b35;
+        }
+
+        .nav-icon {
+            width: 20px;
+            text-align: center;
+        }
+
+        /* 主内容区域 */
+        .main-content {
+            margin-left: 200px;
+            margin-top: 60px;
+            padding: 20px;
+            min-height: calc(100vh - 60px);
+        }
+
+        .content-header {
+            background: white;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .page-title {
+            font-size: 24px;
+            font-weight: bold;
+            margin-bottom: 20px;
+            color: #2c3e50;
+        }
+
+        /* 订单筛选标签 */
+        .order-tabs {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+            border-bottom: 1px solid #e9ecef;
+            padding-bottom: 10px;
+        }
+
+        .tab-btn {
+            padding: 10px 20px;
+            border: none;
+            background: white;
+            color: #666;
+            cursor: pointer;
+            border-radius: 6px 6px 0 0;
+            position: relative;
+            transition: all 0.3s;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .tab-btn:hover {
+            background: #f8f9fa;
+        }
+
+        .tab-btn.active {
+            background: #ff6b35;
+            color: white;
+        }
+
+
+
+        /* 搜索筛选栏 */
+        .search-bar {
+            background: white;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .search-form {
+            display: grid;
+            grid-template-columns: repeat(5, 1fr);
+            gap: 15px;
+            align-items: end;
+        }
+        
+        .search-form .form-group:last-child {
+            grid-column: span 2;
+            display: flex;
+            gap: 10px;
+            justify-content: flex-start;
+        }
+
+        .form-group {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+
+        .form-label {
+            font-weight: bold;
+            color: #495057;
+            font-size: 14px;
+        }
+
+        .form-input {
+            padding: 8px 12px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+
+        .form-input:focus {
+            outline: none;
+            border-color: #ff6b35;
+            box-shadow: 0 0 0 2px rgba(255, 107, 53, 0.2);
+        }
+
+        /* 日期选择器样式 */
+        input[type="date"] {
+            cursor: pointer;
+        }
+
+        input[type="date"]:hover {
+            border-color: #007bff;
+        }
+
+        input[type="date"]:focus {
+            outline: none;
+            border-color: #007bff;
+            box-shadow: 0 0 0 2px rgba(0, 123, 255, 0.25);
+        }
+
+        .search-btn {
+            background: #2c3e50;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: bold;
+            transition: background 0.3s;
+        }
+
+        .search-btn:hover {
+            background: #34495e;
+        }
+
+        /* 订单表格 */
+        .orders-table {
+            background: white;
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .table-header {
+            background: #f8f9fa;
+            padding: 15px 20px;
+            border-bottom: 1px solid #e9ecef;
+            font-weight: bold;
+            color: #495057;
+        }
+
+        .table-container {
+            max-height: 600px;
+            overflow-y: auto;
+        }
+
+        .table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        .table th {
+            background: #f8f9fa;
+            padding: 12px 15px;
+            text-align: left;
+            font-weight: bold;
+            color: #495057;
+            border-bottom: 1px solid #e9ecef;
+            position: sticky;
+            top: 0;
+            z-index: 10;
+        }
+
+        .table td {
+            padding: 12px 15px;
+            border-bottom: 1px solid #e9ecef;
+            vertical-align: middle;
+        }
+
+        .table tbody tr:hover {
+            background: #f8f9fa;
+        }
+
+        .table tbody tr:nth-child(even) {
+            background: #fafafa;
+        }
+
+        /* 订单状态样式 */
+        .status-badge {
+            padding: 4px 8px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: bold;
+            text-align: center;
+            display: inline-block;
+            min-width: 60px;
+        }
+
+        .status-pending {
+            background: #fff3cd;
+            color: #856404;
+        }
+
+        .status-preparing {
+            background: #d1ecf1;
+            color: #0c5460;
+        }
+
+        .status-completed {
+            background: #cce5ff;
+            color: #004085;
+        }
+
+
+
+        /* 商品信息样式 */
+        .dishes-info {
+            max-width: 200px;
+            word-wrap: break-word;
+            line-height: 1.4;
+        }
+
+        .dishes-info:hover {
+            cursor: help;
+        }
+
+        /* 备注信息样式 */
+        .remark-info {
+            max-width: 150px;
+            word-wrap: break-word;
+            line-height: 1.4;
+            color: #666;
+            font-style: italic;
+        }
+
+        .remark-info:hover {
+            cursor: help;
+        }
+
+        /* 特殊备注样式 */
+        .remark-special {
+            color: #e74c3c;
+            font-weight: bold;
+        }
+
+        /* 表格单元格样式优化 */
+        .table td {
+            vertical-align: middle;
+            padding: 12px 8px;
+        }
+
+        .table th {
+            background: #f8f9fa;
+            font-weight: 600;
+            color: #495057;
+        }
+
+        /* 操作按钮 */
+        .action-buttons {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        .btn {
+            padding: 6px 12px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+            font-weight: bold;
+            transition: all 0.3s;
+            text-decoration: none;
+            display: inline-block;
+        }
+
+        .btn-primary {
+            background: #007bff;
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: #0056b3;
+        }
+
+        .btn-success {
+            background: #28a745;
+            color: white;
+        }
+
+        .btn-success:hover {
+            background: #218838;
+        }
+
+        .btn-danger {
+            background: #dc3545;
+            color: white;
+        }
+
+        .btn-danger:hover {
+            background: #c82333;
+        }
+
+        .btn-link {
+            background: none;
+            color: #007bff;
+            text-decoration: underline;
+        }
+
+        .btn-link:hover {
+            color: #0056b3;
+        }
+
+        .no-action {
+            color: #999;
+            font-style: italic;
+            font-size: 0.9em;
+            padding: 6px 12px;
+        }
+
+        /* 通知 */
+        .notification {
+            position: fixed;
+            top: 80px;
+            right: 20px;
+            background: #28a745;
+            color: white;
+            padding: 15px 20px;
+            border-radius: 5px;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+            transform: translateX(100%);
+            transition: transform 0.3s ease;
+            z-index: 1001;
+            max-width: 300px;
+        }
+
+        .notification.show {
+            transform: translateX(0);
+        }
+
+        /* 加载动画 */
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #666;
+        }
+
+        .spinner {
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #ff6b35;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 20px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        /* 响应式设计 */
+        @media (max-width: 768px) {
+            .sidebar {
+                transform: translateX(-100%);
+                transition: transform 0.3s;
+            }
+
+            .sidebar.open {
+                transform: translateX(0);
+            }
+
+            .main-content {
+                margin-left: 0;
+            }
+
+            .search-form {
+                grid-template-columns: 1fr;
+            }
+            
+            .search-form .form-group:last-child {
+                grid-column: span 1;
+                flex-direction: column;
+            }
+
+            .table-container {
+                overflow-x: auto;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- 顶部导航栏 -->
+    <div class="top-header">
+        <div class="logo">
+            <div class="logo-text">
+                <span class="chinese">CMCC咖啡</span>
+                <span class="english">CMCC COFFEE</span>
+            </div>
+        </div>
+
+            <div class="status-indicator">
+            <div class="business-status" id="business-status">
+                <div class="status-dot" id="status-dot"></div>
+                <span id="status-text">营业中</span>
+            </div>
+        </div>
+        
+        <div class="user-menu">
+            <div class="settings-dropdown">
+                <button class="settings-btn" onclick="toggleSettingsMenu()">
+                    <i class="fas fa-cog"></i>
+                    <span>营业状态设置</span>
+                    <i class="fas fa-chevron-down"></i>
+            </button>
+                <div class="settings-menu" id="settings-menu">
+                    <div class="settings-item" onclick="setBusinessStatus('open')">
+                        <i class="fas fa-play-circle"></i>
+                        <span>开始营业</span>
+                    </div>
+                    <div class="settings-item" onclick="setBusinessStatus('closed')">
+                        <i class="fas fa-stop-circle"></i>
+                        <span>停止营业</span>
+                    </div>
+                </div>
+            </div>
+            <div class="admin-dropdown">
+                <i class="fas fa-user"></i>
+                <span>管理员</span>
+                <i class="fas fa-chevron-down"></i>
+            </div>
+        </div>
+        </div>
+
+    <!-- 侧边栏 -->
+    <div class="sidebar">
+        <ul class="nav-menu">
+            <li class="nav-item">
+                <a href="#" class="nav-link active">
+                    <i class="fas fa-list nav-icon"></i>
+                    <span>订单管理</span>
+                </a>
+            </li>
+        </ul>
+    </div>
+
+    <!-- 主内容区域 -->
+    <div class="main-content">
+        <div class="content-header">
+            <h1 class="page-title">订单管理</h1>
+            
+            <!-- 订单筛选标签 -->
+            <div class="order-tabs">
+                <button class="tab-btn active" onclick="filterOrders('all', this)">
+                    <span>全部订单</span>
+                </button>
+                <button class="tab-btn" onclick="filterOrders('pending', this)">
+                    <span>未完成</span>
+                </button>
+                <button class="tab-btn" onclick="filterOrders('completed', this)">
+                    <span>已完成</span>
+                </button>
+            </div>
+        </div>
+
+        <!-- 搜索筛选栏 -->
+        <div class="search-bar">
+            <form class="search-form">
+                <div class="form-group">
+                    <label class="form-label">订单号:</label>
+                    <input type="text" class="form-input" placeholder="请填写订单号" id="order-number">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">手机号:</label>
+                    <input type="text" class="form-input" placeholder="请填写手机号" id="phone-number">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">取餐码:</label>
+                    <div style="display: flex; gap: 8px;">
+                        <input type="text" class="form-input" placeholder="请填写取餐码" id="pickup-code">
+                        <button type="button" class="search-btn" onclick="quickSearchPickupCode()" style="white-space: nowrap;">
+                            <i class="fas fa-search"></i> 快速查询
+                        </button>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">下单时间:</label>
+                    <input type="date" class="form-input" id="order-date" placeholder="选择日期">
+                </div>
+                <div class="form-group">
+                    <button type="button" class="search-btn" onclick="searchOrders()">
+                        <i class="fas fa-search"></i>
+                        查询
+                    </button>
+                    <button type="button" class="clear-btn" onclick="clearSearch()" style="background: #95a5a6; border: none; color: white; padding: 10px 15px; border-radius: 4px; cursor: pointer;">
+                        <i class="fas fa-times"></i>
+                        清除
+                    </button>
+                </div>
+            </form>
+        </div>
+
+        <!-- 订单表格 -->
+        <div class="orders-table">
+            <div class="table-header">
+                订单列表
+            </div>
+            <div class="table-container">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>订单号</th>
+                            <th>订单状态</th>
+                            <th>商品信息</th>
+                            <th>备注</th>
+                            <th>用户名</th>
+                            <th>手机号</th>
+                            <th>地址</th>
+                            <th>下单时间</th>
+                            <th>实收金额</th>
+                            <th>操作</th>
+                        </tr>
+                    </thead>
+                    <tbody id="orders-tbody">
+                        <tr>
+                            <td colspan="8">
+            <div class="loading">
+                <div class="spinner"></div>
+                <p>正在加载订单...</p>
+                                </div>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- 通知 -->
+    <div class="notification" id="notification">
+        <strong>新订单提醒</strong><br>
+        <span id="notification-text"></span>
+    </div>
+
+    <script>
+        let currentOrders = [];
+        let lastOrderCount = 0;
+        let currentFilter = 'all';
+        let businessStatus = 'open'; // 默认营业中
+        
+        // 保存搜索条件
+        let searchConditions = {
+            orderNumber: '',
+            phoneNumber: '',
+            orderDate: '',
+            pickupCode: ''
+        };
+
+        // 页面加载完成后开始监控
+        document.addEventListener('DOMContentLoaded', function() {
+            loadOrders();
+            // 每5秒自动刷新
+            setInterval(loadOrders, 5000);
+        });
+
+        function loadOrders() {
+            fetch('/api/orders/all')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.code === 1) {
+                        currentOrders = data.data;
+                        updateOrderCounts();
+                        // 根据当前筛选条件显示订单（会自动应用智能排序）
+                        applyCurrentFilter();
+                        checkNewOrders(currentOrders);
+                    } else {
+                        showError('获取订单失败');
+                    }
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    showError('网络错误');
+                });
+        }
+
+        function updateOrderCounts() {
+            // 移除数量统计功能
+        }
+
+        function applyCurrentFilter() {
+            let filteredOrders = [];
+            
+            // 先按状态筛选
+            switch(currentFilter) {
+                case 'all':
+                    filteredOrders = currentOrders;
+                    break;
+                case 'pending':
+                    filteredOrders = currentOrders.filter(o => o.status !== '已完成');
+                    break;
+                case 'completed':
+                    filteredOrders = currentOrders.filter(o => o.status === '已完成');
+                    break;
+                default:
+                    filteredOrders = currentOrders;
+            }
+            
+            // 再按搜索条件筛选
+            if (searchConditions.orderNumber) {
+                filteredOrders = filteredOrders.filter(o => o.number.includes(searchConditions.orderNumber));
+            }
+            
+            if (searchConditions.phoneNumber) {
+                filteredOrders = filteredOrders.filter(o => o.phone.includes(searchConditions.phoneNumber));
+            }
+            
+            if (searchConditions.orderDate) {
+                const selectedDate = searchConditions.orderDate;
+                filteredOrders = filteredOrders.filter(o => {
+                    const orderDate = new Date(o.orderTime).toISOString().split('T')[0];
+                    return orderDate === selectedDate;
+                });
+            }
+            
+            if (searchConditions.pickupCode) {
+                filteredOrders = filteredOrders.filter(o => {
+                    const remark = o.remark || '';
+                    if (remark.includes('取餐码:')) {
+                        const orderPickupCode = remark.split('取餐码:')[1].trim();
+                        return orderPickupCode.includes(searchConditions.pickupCode);
+                    }
+                    return false;
+                });
+            }
+            
+            // 智能排序：未完成优先显示，已完成按时间倒序
+            filteredOrders.sort((a, b) => {
+                // 定义状态优先级：非已完成 > 已完成
+                const priorityA = a.status === '已完成' ? 2 : 1;
+                const priorityB = b.status === '已完成' ? 2 : 1;
+                
+                // 如果状态优先级不同，按优先级排序
+                if (priorityA !== priorityB) {
+                    return priorityA - priorityB;
+                }
+                
+                // 如果状态相同，按时间倒序（最新的在前）
+                return new Date(b.orderTime) - new Date(a.orderTime);
+            });
+            
+            displayOrders(filteredOrders);
+        }
+
+        function filterOrders(filter, clickedButton) {
+            currentFilter = filter;
+            
+            // 更新标签状态 - 移除所有active类，然后给点击的按钮添加active类
+            document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+            clickedButton.classList.add('active');
+            
+            applyCurrentFilter();
+        }
+
+        function searchOrders() {
+            // 保存搜索条件
+            searchConditions.orderNumber = document.getElementById('order-number').value;
+            searchConditions.phoneNumber = document.getElementById('phone-number').value;
+            searchConditions.orderDate = document.getElementById('order-date').value;
+            searchConditions.pickupCode = document.getElementById('pickup-code').value;
+            
+            // 应用筛选
+            applyCurrentFilter();
+        }
+
+        function clearSearch() {
+            // 清除搜索条件
+            searchConditions = {
+                orderNumber: '',
+                phoneNumber: '',
+                orderDate: '',
+                pickupCode: ''
+            };
+            
+            // 清空输入框
+            document.getElementById('order-number').value = '';
+            document.getElementById('phone-number').value = '';
+            document.getElementById('order-date').value = '';
+            document.getElementById('pickup-code').value = '';
+            
+            // 应用筛选
+            applyCurrentFilter();
+        }
+
+        function displayOrders(orders) {
+            const tbody = document.getElementById('orders-tbody');
+            
+            if (orders.length === 0) {
+                tbody.innerHTML = `
+                    <tr>
+                        <td colspan="10" style="text-align: center; padding: 40px; color: #666;">
+                            <i class="fas fa-inbox" style="font-size: 48px; margin-bottom: 10px; color: #ddd;"></i>
+                            <p>暂无订单数据</p>
+                        </td>
+                    </tr>
+                `;
+                return;
+            }
+
+            tbody.innerHTML = orders.map(order => createOrderRow(order)).join('');
+        }
+
+        function createOrderRow(order) {
+            const statusText = getStatusText(order.status);
+            const statusClass = getStatusClass(order.status);
+            const orderTime = new Date(order.orderTime).toLocaleString('zh-CN');
+            
+            // 处理商品信息显示
+            let dishesText = '无商品信息';
+            if (order.dishes && order.dishes.length > 0) {
+                dishesText = order.dishes.map(dish => dish.name).join(', ');
+            }
+            
+            // 处理备注信息显示
+            let remarkText = order.remark || '无备注';
+            let remarkClass = 'remark-info';
+            
+            // 为特殊备注添加样式
+            if (remarkText && remarkText !== '无备注' && remarkText !== 'nan') {
+                const specialKeywords = ['少糖', '多冰', '不要奶泡', '快点送', '热饮', '冷饮'];
+                if (specialKeywords.some(keyword => remarkText.includes(keyword))) {
+                    remarkClass += ' remark-special';
+                }
+            }
+            
+            return `
+                <tr>
+                    <td>${order.number}</td>
+                    <td><span class="status-badge ${statusClass}">${statusText}</span></td>
+                    <td class="dishes-info" title="${dishesText}">${dishesText.length > 25 ? dishesText.substring(0, 25) + '...' : dishesText}</td>
+                    <td class="${remarkClass}" title="${remarkText}">${remarkText.length > 15 ? remarkText.substring(0, 15) + '...' : remarkText}</td>
+                    <td>${order.userName || '未知'}</td>
+                    <td>${order.phone || '未知'}</td>
+                    <td title="${order.address || '未知'}">${(order.address || '未知').length > 20 ? (order.address || '未知').substring(0, 20) + '...' : (order.address || '未知')}</td>
+                    <td>${orderTime}</td>
+                    <td>¥${order.amount}</td>
+                    <td>${getActionButtons(order.status, order.id)}</td>
+                </tr>
+            `;
+        }
+
+        function getStatusText(status) {
+            // 处理字符串状态
+            if (typeof status === 'string') {
+                return status; // 直接返回原始状态文本
+            }
+            
+            // 兼容数字状态（向后兼容）
+            const statusMap = {
+                2: '未完成',
+                5: '已完成'
+            };
+            return statusMap[status] || '未知状态';
+        }
+
+        function getStatusClass(status) {
+            // 处理字符串状态
+            if (typeof status === 'string') {
+                if (status === '已完成') {
+                    return 'status-completed';
+                } else {
+                    return 'status-pending';
+                }
+            }
+            
+            // 兼容数字状态（向后兼容）
+            const classMap = {
+                2: 'status-pending',
+                5: 'status-completed'
+            };
+            return classMap[status] || 'status-pending';
+        }
+
+        function getActionButtons(status, orderId) {
+            let buttons = '';
+            
+            // 处理字符串状态
+            if (typeof status === 'string') {
+                if (status !== '已完成') {
+                buttons += `
+                        <button class="btn btn-secondary" onclick="updateOrder(${orderId}, 'complete')">${status}</button>
+                `;
+                }
+            } else {
+                // 兼容数字状态（向后兼容）
+                if (status === 2) { // 未完成
+                buttons += `
+                        <button class="btn btn-secondary" onclick="updateOrder(${orderId}, 'complete')">未完成</button>
+                `;
+                }
+            }
+            
+            return buttons;
+        }
+
+        function updateOrder(orderId, action) {
+            const actionText = {
+                'complete': '完成订单'
+            }[action];
+
+            // 直接执行操作，不需要确认对话框
+
+            fetch(`/api/order/${orderId}/${action}`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.code === 1) {
+                    showNotification(`${actionText}成功！Excel文件已同步更新`);
+                    loadOrders(); // 刷新订单列表
+                } else {
+                    showError(data.msg || `${actionText}失败`);
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                showError('操作失败');
+            });
+        }
+
+
+
+        function checkNewOrders(orders) {
+            const currentCount = orders.length;
+            if (currentCount > lastOrderCount && lastOrderCount > 0) {
+                const newCount = currentCount - lastOrderCount;
+                showNotification(`收到 ${newCount} 个新订单！`);
+                playNotificationSound();
+            }
+            lastOrderCount = currentCount;
+        }
+
+        function showNotification(message) {
+            const notification = document.getElementById('notification');
+            const notificationText = document.getElementById('notification-text');
+            
+            notificationText.textContent = message;
+            notification.classList.add('show');
+            
+            setTimeout(() => {
+                notification.classList.remove('show');
+            }, 3000);
+        }
+
+        function showError(message) {
+            showNotification(`错误: ${message}`);
+        }
+
+        function playNotificationSound() {
+            try {
+                const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                const oscillator = audioContext.createOscillator();
+                const gainNode = audioContext.createGain();
+                
+                oscillator.connect(gainNode);
+                gainNode.connect(audioContext.destination);
+                
+                oscillator.frequency.setValueAtTime(800, audioContext.currentTime);
+                oscillator.frequency.setValueAtTime(600, audioContext.currentTime + 0.1);
+                oscillator.frequency.setValueAtTime(800, audioContext.currentTime + 0.2);
+                
+                gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
+                gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.3);
+                
+                oscillator.start(audioContext.currentTime);
+                oscillator.stop(audioContext.currentTime + 0.3);
+            } catch (e) {
+                console.log('音频播放失败:', e);
+            }
+        }
+
+        // 营业状态管理函数
+        function toggleSettingsMenu() {
+            const menu = document.getElementById('settings-menu');
+            menu.classList.toggle('show');
+        }
+
+        function setBusinessStatus(status) {
+            businessStatus = status;
+            const statusElement = document.getElementById('business-status');
+            const statusText = document.getElementById('status-text');
+            const statusDot = document.getElementById('status-dot');
+            const menu = document.getElementById('settings-menu');
+            
+            // 隐藏菜单
+            menu.classList.remove('show');
+            
+            if (status === 'open') {
+                statusElement.classList.remove('closed');
+                statusDot.classList.remove('closed');
+                statusText.textContent = '营业中';
+                showNotification('已开始营业');
+            } else if (status === 'closed') {
+                statusElement.classList.add('closed');
+                statusDot.classList.add('closed');
+                statusText.textContent = '停止营业';
+                showNotification('已停止营业');
+            }
+        }
+
+        // 快速查询取餐码
+        function quickSearchPickupCode() {
+            const pickupCode = document.getElementById('pickup-code').value.trim();
+            if (!pickupCode) {
+                showError('请输入取餐码');
+                return;
+            }
+            
+            // 显示加载状态
+            showNotification('正在查询取餐码...');
+            
+            fetch(`/api/search/pickup-code/${pickupCode}`)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.code === 1) {
+                        const orders = data.data;
+                        if (orders.length > 0) {
+                            // 显示查询结果
+                            showNotification(`找到 ${orders.length} 个匹配的订单`);
+                            // 更新当前订单列表为查询结果
+                            currentOrders = orders;
+                            applyCurrentFilter();
+                        } else {
+                            showError('未找到匹配的订单');
+                        }
+                    } else {
+                        showError(data.msg || '查询失败');
+                    }
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    showError('网络错误');
+                });
+        }
+
+        // 点击其他地方关闭菜单
+        document.addEventListener('click', function(event) {
+            const settingsDropdown = document.querySelector('.settings-dropdown');
+            const menu = document.getElementById('settings-menu');
+            
+            if (!settingsDropdown.contains(event.target)) {
+                menu.classList.remove('show');
+            }
+        });
+    </script>
+</body>
+</html> 
