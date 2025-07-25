@@ -469,10 +469,18 @@
             line-height: 1.4;
             color: #666;
             font-style: italic;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            cursor: help;
+            position: relative;
         }
 
         .remark-info:hover {
             cursor: help;
+            background-color: #f8f9fa;
+            border-radius: 4px;
+            padding: 2px 4px;
         }
 
         /* 特殊备注样式 */
@@ -962,6 +970,12 @@
                 }
             }
             
+            // 处理备注显示：如果太长则截断并添加省略号
+            let displayRemark = remarkText;
+            if (remarkText.length > 15) {
+                displayRemark = remarkText.substring(0, 15) + '...';
+            }
+            
             return `
                 <tr>
                     <td>${order.number}</td>
@@ -972,7 +986,7 @@
                     <td title="${order.address || '未知'}">${(order.address || '未知').length > 20 ? (order.address || '未知').substring(0, 20) + '...' : (order.address || '未知')}</td>
                     <td>${orderTime}</td>
                     <td>¥${order.amount}</td>
-                    <td title="${order.remark || 'nan'}">${order.remark || 'nan'}</td>
+                    <td class="${remarkClass}" title="${remarkText}">${displayRemark}</td>
                     <td>${getActionButtons(order.status, order.number)}</td>
                 </tr>
             `;
