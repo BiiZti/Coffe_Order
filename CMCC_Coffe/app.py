@@ -33,6 +33,7 @@ COMPLETED = 5        # 已完成
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 EXCEL_FOLDER = os.path.join(PROJECT_ROOT, "data")  # 从项目data文件夹读取Excel文件
 EXCEL_PATTERN = "*前端咖啡订单*.xlsx"  # 只匹配前端专用咖啡订单Excel文件
+ALL_ORDERS_PATTERN = "*所有外卖订单*.xlsx"  # 匹配所有外卖订单Excel文件
 
 # Excel文件操作锁，防止并发写入冲突
 excel_write_lock = threading.Lock()
@@ -117,6 +118,56 @@ def get_latest_file_by_date(excel_files):
     
     return latest_file
 
+def load_all_orders_prices():
+    """从所有外卖订单文件中加载价格数据"""
+    try:
+        # 查找所有外卖订单Excel文件
+        all_orders_files = glob.glob(os.path.join(EXCEL_FOLDER, ALL_ORDERS_PATTERN))
+        
+        if not all_orders_files:
+            print("⚠️ 未找到所有外卖订单Excel文件，无法加载价格数据")
+            return {}
+        
+        # 读取最新的所有外卖订单Excel文件
+        latest_all_orders_file = get_latest_file_by_date(all_orders_files)
+        print(f"📊 读取所有外卖订单文件: {latest_all_orders_file}")
+        
+        # 读取Excel数据
+        df = pd.read_excel(latest_all_orders_file, engine='openpyxl')
+        print(f"✅ 成功读取所有外卖订单文件，数据行数: {len(df)}")
+        
+        # 创建订单编号到实际支付金额的映射
+        price_mapping = {}
+        
+        for index, row in df.iterrows():
+            try:
+                order_number = row.get('订单编号')
+                actual_payment = row.get('实际支付金额')
+                
+                if pd.notna(order_number) and pd.notna(actual_payment):
+                    order_number_str = str(order_number)
+                    try:
+                        actual_payment_float = float(actual_payment)
+                        price_mapping[order_number_str] = actual_payment_float
+                    except (ValueError, TypeError):
+                        print(f"⚠️ 订单{order_number}的实际支付金额格式错误: {actual_payment}")
+                        continue
+                        
+            except Exception as e:
+                print(f"处理第{index + 1}行价格数据时出错: {e}")
+                continue
+        
+        print(f"💰 成功加载 {len(price_mapping)} 个订单的价格数据")
+        return price_mapping
+        
+    except Exception as e:
+        print(f"❌ 读取所有外卖订单文件时出错: {e}")
+        import traceback
+        traceback.print_exc()
+        return {}
+
+
+
 def map_order_status(status_text):
     """映射订单状态文本到数字状态"""
     status_map = {
@@ -171,6 +222,9 @@ def read_excel_orders():
         
         # 确保Excel文件可写
         ensure_excel_files_writable()
+        
+        # 价格数据由咖啡订单监控程序自动更新，前端只负责读取显示
+        print("💰 价格数据由监控程序自动更新，前端直接读取")
         
         # 查找所有咖啡订单Excel文件
         excel_files = glob.glob(os.path.join(EXCEL_FOLDER, EXCEL_PATTERN))
@@ -285,6 +339,19 @@ def read_excel_orders():
                     else:
                         order_id = 1
                 
+                # 从咖啡订单Excel文件中直接读取实际价格
+                actual_price = row.get('实际价格', 0.0)
+                if pd.isna(actual_price):
+                    actual_price = 0.0
+                else:
+                    try:
+                        actual_price = float(actual_price)
+                    except (ValueError, TypeError):
+                        actual_price = 0.0
+                
+                if actual_price > 0:
+                    print(f"💰 咖啡订单{order_number}的实际价格: ¥{actual_price}")
+                
                 order = {
                     'id': order_id,
                     'number': str(order_number),
@@ -292,7 +359,7 @@ def read_excel_orders():
                     'userName': str(row.get('姓名', '未知')),
                     'phone': str(row.get('手机号码', '未知')),
                     'address': str(row.get('部门', '未知')),
-                    'amount': 0.0,  # 前端Excel中没有金额字段
+                    'amount': actual_price,  # 使用从所有外卖订单中匹配的实际支付金额
                     'orderTime': str(row.get('支付时间', datetime.now().isoformat())),
                     'remark': str(row.get('订单备注', 'nan')),
                     'dishes': []
@@ -1119,6 +1186,8 @@ def api_system_status():
         })
     except Exception as e:
         return jsonify({'code': 0, 'msg': f'获取系统状态失败: {str(e)}'})
+
+
 
 # 导出函数供main.py使用
 def init_app():

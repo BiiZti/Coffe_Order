@@ -800,8 +800,69 @@ def process_excel(file_path):
     return coffee_df
 
 
+def load_price_data_from_all_orders():
+    """从所有外卖订单文件中加载价格数据"""
+    try:
+        today_str = datetime.now().strftime("%Y%m%d")
+        all_orders_filename = f"{today_str}_所有外卖订单.xlsx"
+        all_orders_path = os.path.join(project_data_dir, all_orders_filename)
+        
+        if not os.path.exists(all_orders_path):
+            print("⚠️ 所有外卖订单文件不存在，无法加载价格数据")
+            return {}
+        
+        print(f"📊 读取所有外卖订单文件: {all_orders_filename}")
+        
+        # 读取Excel数据
+        try:
+            df = pd.read_excel(all_orders_path, engine='openpyxl')
+        except Exception as e1:
+            try:
+                df = pd.read_excel(all_orders_path, engine='xlrd')
+            except Exception as e2:
+                try:
+                    df = pd.read_excel(all_orders_path)
+                except Exception as e3:
+                    print(f"❌ 无法读取所有外卖订单文件:")
+                    print(f"   openpyxl错误: {e1}")
+                    print(f"   xlrd错误: {e2}")
+                    print(f"   自动选择错误: {e3}")
+                    return {}
+        
+        print(f"✅ 成功读取所有外卖订单文件，数据行数: {len(df)}")
+        
+        # 创建订单编号到实际支付金额的映射
+        price_mapping = {}
+        
+        for index, row in df.iterrows():
+            try:
+                order_number = row.get('订单编号')
+                actual_payment = row.get('实际支付金额')
+                
+                if pd.notna(order_number) and pd.notna(actual_payment):
+                    order_number_str = str(order_number)
+                    try:
+                        actual_payment_float = float(actual_payment)
+                        price_mapping[order_number_str] = actual_payment_float
+                    except (ValueError, TypeError):
+                        print(f"⚠️ 订单{order_number}的实际支付金额格式错误: {actual_payment}")
+                        continue
+                        
+            except Exception as e:
+                print(f"处理第{index + 1}行价格数据时出错: {e}")
+                continue
+        
+        print(f"💰 成功加载 {len(price_mapping)} 个订单的价格数据")
+        return price_mapping
+        
+    except Exception as e:
+        print(f"❌ 读取所有外卖订单文件时出错: {e}")
+        import traceback
+        traceback.print_exc()
+        return {}
+
 def update_frontend_excel(new_coffee_df):
-    """更新前端专用Excel文件，通过订单号同步"""
+    """更新前端专用Excel文件，通过订单号同步，并添加价格数据"""
     today_str = datetime.now().strftime("%Y%m%d")
     frontend_excel_path = os.path.join(project_data_dir, f"{today_str}_前端咖啡订单.xlsx")
     
@@ -819,6 +880,10 @@ def update_frontend_excel(new_coffee_df):
             print("❌ 新数据中未找到'订单编号'列")
             print(f"   可用列: {list(new_coffee_df.columns)}")
             return False
+        
+        # 加载价格数据
+        print("💰 开始加载价格数据...")
+        price_mapping = load_price_data_from_all_orders()
         
         # 获取文件锁
         if not lock_manager.acquire_lock(timeout=15):
@@ -863,6 +928,11 @@ def update_frontend_excel(new_coffee_df):
                         print(f"⚠️ 跳过无效订单编号 (行 {index + 1}): {order_id}")
                         continue
                     
+                    # 获取价格数据
+                    actual_price = price_mapping.get(order_id, 0.0)
+                    if actual_price > 0:
+                        print(f"💰 订单{order_id}的实际价格: ¥{actual_price}")
+                    
                     # 检查是否已存在
                     existing_row = None
                     if existing_df is not None and '订单编号' in existing_df.columns:
@@ -884,9 +954,9 @@ def update_frontend_excel(new_coffee_df):
                             '订单备注': str(new_row.get('订单备注', '')).strip(),
                             '状态': existing_status,  # 保持现有状态
                             '状态名称': status_name,  # 添加状态名称
-                            '处理时间': str(existing_row.get('处理时间', '')).strip()
+                            '实际价格': actual_price  # 添加实际价格
                         }
-                        print(f"🔄 更新订单: {order_id} (保持状态: {status_name})")
+                        print(f"🔄 更新订单: {order_id} (保持状态: {status_name}, 价格: ¥{actual_price})")
                     else:
                         # 新订单
                         frontend_row = {
@@ -899,9 +969,9 @@ def update_frontend_excel(new_coffee_df):
                             '订单备注': str(new_row.get('订单备注', '')).strip(),
                             '状态': '2',  # 默认备货中状态
                             '状态名称': '备货中',  # 添加状态名称
-                            '处理时间': ''
+                            '实际价格': actual_price  # 添加实际价格
                         }
-                        print(f"🆕 新增订单: {order_id} (状态: 备货中)")
+                        print(f"🆕 新增订单: {order_id} (状态: 备货中, 价格: ¥{actual_price})")
                     
                     frontend_data.append(frontend_row)
                     

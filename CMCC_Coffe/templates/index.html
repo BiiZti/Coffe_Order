@@ -985,7 +985,7 @@
                     <td>${order.phone || '未知'}</td>
                     <td title="${order.address || '未知'}">${(order.address || '未知').length > 20 ? (order.address || '未知').substring(0, 20) + '...' : (order.address || '未知')}</td>
                     <td>${orderTime}</td>
-                    <td>¥${order.amount}</td>
+                    <td>¥${order.amount.toFixed(2)}</td>
                     <td class="${remarkClass}" title="${remarkText}">${displayRemark}</td>
                     <td>${getActionButtons(order.status, order.number)}</td>
                 </tr>
