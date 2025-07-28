@@ -687,6 +687,26 @@
         <div class="content-header">
             <h1 class="page-title">订单管理</h1>
             
+            <!-- 统计信息显示 -->
+            <div class="statistics-bar" style="background: #f8f9fa; padding: 15px; border-radius: 8px; margin-bottom: 20px; display: flex; justify-content: space-around; align-items: center;">
+                <div class="stat-item" style="text-align: center;">
+                    <div class="stat-number" id="total-orders" style="font-size: 24px; font-weight: bold; color: #2c3e50;">0</div>
+                    <div class="stat-label" style="font-size: 14px; color: #666;">总订单数</div>
+                </div>
+                <div class="stat-item" style="text-align: center;">
+                    <div class="stat-number" id="pending-orders" style="font-size: 24px; font-weight: bold; color: #e74c3c;">0</div>
+                    <div class="stat-label" style="font-size: 14px; color: #666;">未完成</div>
+                </div>
+                <div class="stat-item" style="text-align: center;">
+                    <div class="stat-number" id="completed-orders" style="font-size: 24px; font-weight: bold; color: #27ae60;">0</div>
+                    <div class="stat-label" style="font-size: 14px; color: #666;">已完成</div>
+                </div>
+                <div class="stat-item" style="text-align: center;">
+                    <div class="stat-number" id="total-amount" style="font-size: 24px; font-weight: bold; color: #f39c12;">¥0.00</div>
+                    <div class="stat-label" style="font-size: 14px; color: #666;">总金额</div>
+                </div>
+            </div>
+            
             <!-- 订单筛选标签 -->
             <div class="order-tabs">
                 <button class="tab-btn active" onclick="filterOrders('all', this)">
@@ -822,7 +842,17 @@
         }
 
         function updateOrderCounts() {
-            // 移除数量统计功能
+            // 更新统计信息显示
+            const totalOrders = currentOrders.length;
+            const pendingOrders = currentOrders.filter(o => o.status !== '已完成').length;
+            const completedOrders = currentOrders.filter(o => o.status === '已完成').length;
+            const totalAmount = currentOrders.reduce((sum, order) => sum + (order.amount || 0), 0);
+            
+            // 更新DOM元素
+            document.getElementById('total-orders').textContent = totalOrders;
+            document.getElementById('pending-orders').textContent = pendingOrders;
+            document.getElementById('completed-orders').textContent = completedOrders;
+            document.getElementById('total-amount').textContent = `¥${totalAmount.toFixed(2)}`;
         }
 
         function applyCurrentFilter() {

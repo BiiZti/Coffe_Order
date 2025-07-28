@@ -1143,7 +1143,7 @@ def do_check():
     
     # 缩短下次检查间隔，提高响应速度
     print("🔄 准备进行下一次数据检查...")
-    root.after(30000, do_check)  # 改为30秒间隔
+    root.after(5000, do_check)  # 改为5秒间隔
 
 
 def start_program():
