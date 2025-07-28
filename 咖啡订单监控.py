@@ -204,15 +204,23 @@ def stop_minimize_monitor():
 
 
 def is_valid_xlsx(path):
+    """验证Excel文件是否有效"""
     if not os.path.exists(path):
+        print(f"❌ 文件不存在: {path}")
         return False
+    
+    if os.path.getsize(path) == 0:
+        print(f"❌ 文件为空: {path}")
+        return False
+    
     try:
-        with zipfile.ZipFile(path, 'r') as z:
-            if z.testzip() is not None:
-                return False
-    except zipfile.BadZipFile:
+        # 尝试用pandas读取文件
+        df = pd.read_excel(path, nrows=1)  # 只读取第一行来验证
+        print(f"✅ Excel文件有效: {os.path.basename(path)}")
+        return True
+    except Exception as e:
+        print(f"❌ Excel文件无效 {os.path.basename(path)}: {e}")
         return False
-    return True
 
 
 def cleanup_old_data():
@@ -611,8 +619,8 @@ def wait_for_frontend_processing(timeout=300):
     print("⏳ 等待前端处理数据...")
     
     for i in range(timeout):
-        # 每30秒检查一次前端状态
-        if i % 30 == 0 and i > 0:
+        # 每10秒检查一次前端状态
+        if i % 10 == 0 and i > 0:
             print(f"⏳ 已等待前端处理 {i} 秒...")
         
         # 检查前端是否还在访问数据文件
@@ -722,16 +730,39 @@ def process_excel(file_path):
     df['订单编号'] = df['订单编号'].astype(str).str.strip()
     df['订单分类'] = df['订单分类'].fillna("").astype(str).str.strip()
 
+    # 首先过滤出咖啡订单
     coffee_df = df[
         (df['订单编号'].str.match(r"^[A-Za-z0-9]+$")) &
         (df['订单分类'].str.contains("咖啡", case=False, na=False))
     ]
 
+    print(f"🔍 原始数据: {len(df)} 条")
+    print(f"🔍 过滤后咖啡订单: {len(coffee_df)} 条")
+    
+    # 显示订单分类统计
+    if '订单分类' in df.columns:
+        category_counts = df['订单分类'].value_counts()
+        print("📊 订单分类统计:")
+        for category, count in category_counts.head(10).items():
+            print(f"   {category}: {count} 条")
+
     # 只保留你关心的列
     required_columns = [
-        "订单编号", "手机号码", "姓名", "部门", "支付时间", "订单分类", "Unnamed: 39", "订单备注"
+        "订单编号", "手机号码", "姓名", "部门", "支付时间", "订单分类", "订单备注"
     ]
-    coffee_df = coffee_df[[col for col in required_columns if col in coffee_df.columns]]
+    
+    # 过滤出存在的列，但保持咖啡订单的过滤结果
+    available_columns = [col for col in required_columns if col in coffee_df.columns]
+    coffee_df = coffee_df[available_columns]
+    
+    # 确保所有必需的列都存在
+    for col in ["订单编号", "手机号码", "姓名", "部门", "支付时间", "订单分类"]:
+        if col not in coffee_df.columns:
+            coffee_df[col] = ""
+    
+    # 如果订单备注列不存在，添加空列
+    if "订单备注" not in coffee_df.columns:
+        coffee_df["订单备注"] = ""
 
     print(f"📊 提取出 {len(coffee_df)} 条咖啡订单")
     return coffee_df
@@ -742,7 +773,21 @@ def update_frontend_excel(new_coffee_df):
     today_str = datetime.now().strftime("%Y%m%d")
     frontend_excel_path = os.path.join(project_data_dir, f"{today_str}_前端咖啡订单.xlsx")
     
+    print(f"🔄 开始更新前端Excel文件: {frontend_excel_path}")
+    print(f"📊 新数据包含 {len(new_coffee_df)} 条记录")
+    
     try:
+        # 检查新数据是否为空
+        if new_coffee_df.empty:
+            print("⚠️ 新数据为空，跳过前端Excel更新")
+            return False
+        
+        # 检查订单编号列是否存在
+        if '订单编号' not in new_coffee_df.columns:
+            print("❌ 新数据中未找到'订单编号'列")
+            print(f"   可用列: {list(new_coffee_df.columns)}")
+            return False
+        
         # 获取文件锁
         if not lock_manager.acquire_lock(timeout=15):
             print("⚠️ 无法获取文件锁，跳过前端Excel更新")
@@ -763,58 +808,85 @@ def update_frontend_excel(new_coffee_df):
             frontend_data = []
             
             # 处理新数据
-            for _, new_row in new_coffee_df.iterrows():
-                order_id = str(new_row.get('订单编号', ''))
-                
-                # 检查是否已存在
-                existing_row = None
-                if existing_df is not None:
-                    existing_matches = existing_df[existing_df['订单编号'] == order_id]
-                    if not existing_matches.empty:
-                        existing_row = existing_matches.iloc[0]
-                
-                if existing_row is not None:
-                    # 使用现有状态，更新其他信息
-                    existing_status = str(existing_row.get('状态', '2'))
-                    status_name = get_status_name(existing_status)
-                    frontend_row = {
-                        '订单编号': order_id,
-                        '手机号码': str(new_row.get('手机号码', '')),
-                        '姓名': str(new_row.get('姓名', '')),
-                        '部门': str(new_row.get('部门', '')),
-                        '支付时间': str(new_row.get('支付时间', '')),
-                        '订单分类': str(new_row.get('订单分类', '')),
-                        '订单备注': str(new_row.get('订单备注', '')),
-                        '状态': existing_status,  # 保持现有状态
-                        '状态名称': status_name,  # 添加状态名称
-                        '处理时间': str(existing_row.get('处理时间', ''))
-                    }
-                    print(f"🔄 更新订单: {order_id} (保持状态: {status_name})")
-                else:
-                    # 新订单
-                    frontend_row = {
-                        '订单编号': order_id,
-                        '手机号码': str(new_row.get('手机号码', '')),
-                        '姓名': str(new_row.get('姓名', '')),
-                        '部门': str(new_row.get('部门', '')),
-                        '支付时间': str(new_row.get('支付时间', '')),
-                        '订单分类': str(new_row.get('订单分类', '')),
-                        '订单备注': str(new_row.get('订单备注', '')),
-                        '状态': '2',  # 默认备货中状态
-                        '状态名称': '备货中',  # 添加状态名称
-                        '处理时间': ''
-                    }
-                    print(f"🆕 新增订单: {order_id} (状态: 备货中)")
-                
-                frontend_data.append(frontend_row)
+            for index, new_row in new_coffee_df.iterrows():
+                try:
+                    order_id = str(new_row.get('订单编号', '')).strip()
+                    
+                    # 检查订单编号是否有效
+                    if not order_id or order_id == 'nan':
+                        print(f"⚠️ 跳过无效订单编号 (行 {index + 1}): {order_id}")
+                        continue
+                    
+                    # 检查是否已存在
+                    existing_row = None
+                    if existing_df is not None and '订单编号' in existing_df.columns:
+                        existing_matches = existing_df[existing_df['订单编号'].astype(str).str.strip() == order_id]
+                        if not existing_matches.empty:
+                            existing_row = existing_matches.iloc[0]
+                    
+                    if existing_row is not None:
+                        # 使用现有状态，更新其他信息
+                        existing_status = str(existing_row.get('状态', '2'))
+                        status_name = get_status_name(existing_status)
+                        frontend_row = {
+                            '订单编号': order_id,
+                            '手机号码': str(new_row.get('手机号码', '')).strip(),
+                            '姓名': str(new_row.get('姓名', '')).strip(),
+                            '部门': str(new_row.get('部门', '')).strip(),
+                            '支付时间': str(new_row.get('支付时间', '')).strip(),
+                            '订单分类': str(new_row.get('订单分类', '')).strip(),
+                            '订单备注': str(new_row.get('订单备注', '')).strip(),
+                            '状态': existing_status,  # 保持现有状态
+                            '状态名称': status_name,  # 添加状态名称
+                            '处理时间': str(existing_row.get('处理时间', '')).strip()
+                        }
+                        print(f"🔄 更新订单: {order_id} (保持状态: {status_name})")
+                    else:
+                        # 新订单
+                        frontend_row = {
+                            '订单编号': order_id,
+                            '手机号码': str(new_row.get('手机号码', '')).strip(),
+                            '姓名': str(new_row.get('姓名', '')).strip(),
+                            '部门': str(new_row.get('部门', '')).strip(),
+                            '支付时间': str(new_row.get('支付时间', '')).strip(),
+                            '订单分类': str(new_row.get('订单分类', '')).strip(),
+                            '订单备注': str(new_row.get('订单备注', '')).strip(),
+                            '状态': '2',  # 默认备货中状态
+                            '状态名称': '备货中',  # 添加状态名称
+                            '处理时间': ''
+                        }
+                        print(f"🆕 新增订单: {order_id} (状态: 备货中)")
+                    
+                    frontend_data.append(frontend_row)
+                    
+                except Exception as row_error:
+                    print(f"❌ 处理第 {index + 1} 行数据时出错: {row_error}")
+                    continue
+            
+            # 检查是否有有效数据
+            if not frontend_data:
+                print("⚠️ 没有有效数据，跳过保存")
+                return False
             
             # 保存到前端Excel文件
             frontend_df = pd.DataFrame(frontend_data)
-            frontend_df.to_excel(frontend_excel_path, index=False)
+            
+            # 确保目录存在
+            os.makedirs(os.path.dirname(frontend_excel_path), exist_ok=True)
+            
+            # 保存文件
+            frontend_df.to_excel(frontend_excel_path, index=False, engine='openpyxl')
             print(f"✅ 前端Excel文件已更新: {os.path.basename(frontend_excel_path)}")
             print(f"📊 总订单数: {len(frontend_df)}")
             
-            return True
+            # 验证文件是否成功保存
+            if os.path.exists(frontend_excel_path):
+                file_size = os.path.getsize(frontend_excel_path)
+                print(f"📁 文件大小: {file_size} 字节")
+                return True
+            else:
+                print("❌ 文件保存失败，文件不存在")
+                return False
             
         finally:
             # 释放文件锁
@@ -822,6 +894,8 @@ def update_frontend_excel(new_coffee_df):
             
     except Exception as e:
         print(f"❌ 更新前端Excel失败: {e}")
+        import traceback
+        traceback.print_exc()
         return False
 
 
@@ -946,14 +1020,14 @@ def do_check():
 
     # 等待前端处理完数据后再进行下一次检查
     print("⏳ 等待前端处理数据...")
-    wait_for_frontend_processing(timeout=300)  # 最多等待5分钟
+    wait_for_frontend_processing(timeout=30)  # 最多等待30秒
     
     # 移除处理标志
     remove_processing_flag()
     
-    # 延长下次检查间隔，给前端更多处理时间
+    # 缩短下次检查间隔，提高响应速度
     print("🔄 准备进行下一次数据检查...")
-    root.after(60000, do_check)  # 改为60秒间隔
+    root.after(30000, do_check)  # 改为30秒间隔
 
 
 def start_program():
@@ -965,7 +1039,7 @@ def start_program():
     print("=" * 50)
     print("📋 程序功能：")
     print("   • 自动监控外卖系统中的咖啡订单")
-    print("   • 每30秒检测一次新订单")
+    print("   • 每30秒检测一次新订单（快速响应）")
     print("   • 自动筛选咖啡类订单")
     print("   • 声音提示（无弹窗干扰）")
     print("   • 自动管理Excel文件")

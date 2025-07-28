@@ -34,11 +34,11 @@ class Config:
     REQUEST_RATE_LIMIT = 5  # 秒
     
     # 数据刷新间隔
-    DATA_REFRESH_INTERVAL = 60  # 秒
+    DATA_REFRESH_INTERVAL = 30  # 秒
 
 class DevelopmentConfig(Config):
     """开发环境配置"""
-    DEBUG = True
+    DEBUG = False  # 禁用debug模式，避免重复启动
     THREADED = True
 
 class ProductionConfig(Config):
