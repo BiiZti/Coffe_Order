@@ -769,7 +769,7 @@
                         <tr>
                             <th>订单号</th>
                             <th>订单状态</th>
-                            <th>商品信息</th>
+                            <th>商品名称</th>
                             <th>用户名</th>
                             <th>手机号</th>
                             <th>地址</th>
@@ -982,10 +982,15 @@
             const statusClass = getStatusClass(order.status);
             const orderTime = new Date(order.orderTime).toLocaleString('zh-CN');
             
-            // 处理商品信息显示
+            // 处理商品名称显示
             let dishesText = '无商品信息';
-            if (order.dishes && order.dishes.length > 0) {
+            if (order.productName) {
+                dishesText = order.productName;
+            } else if (order.dishes && order.dishes.length > 0) {
                 dishesText = order.dishes.map(dish => dish.name).join(', ');
+            } else if (order.orderCategory) {
+                // 兼容旧数据
+                dishesText = order.orderCategory;
             }
             
             // 处理备注信息显示
@@ -1010,7 +1015,7 @@
                 <tr>
                     <td>${order.number}</td>
                     <td><span class="status-badge ${statusClass}">${statusText}</span></td>
-                    <td class="dishes-info" title="${dishesText}">${dishesText.length > 25 ? dishesText.substring(0, 25) + '...' : dishesText}</td>
+                    <td class="dishes-info" title="${dishesText}">${dishesText.length > 30 ? dishesText.substring(0, 30) + '...' : dishesText}</td>
                     <td>${order.userName || '未知'}</td>
                     <td>${order.phone || '未知'}</td>
                     <td title="${order.address || '未知'}">${(order.address || '未知').length > 20 ? (order.address || '未知').substring(0, 20) + '...' : (order.address || '未知')}</td>

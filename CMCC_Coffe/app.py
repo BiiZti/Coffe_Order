@@ -365,16 +365,16 @@ def read_excel_orders():
                     'dishes': []
                 }
                 
-                # 处理商品信息（订单分类字段）
-                if '订单分类' in row and pd.notna(row['订单分类']):
-                    dishes_str = str(row['订单分类'])
-                    if dishes_str and dishes_str != 'nan':
-                        # 如果包含逗号，按逗号分割；否则作为单个商品
-                        if ',' in dishes_str:
-                            order['dishes'] = [{'name': dish.strip(), 'price': 0} for dish in dishes_str.split(',')]
-                        else:
-                            order['dishes'] = [{'name': dishes_str.strip(), 'price': 0}]
-                        print(f"📦 订单{valid_order_id}商品信息: {dishes_str}")
+                # 处理商品名称信息
+                if '商品名称' in row and pd.notna(row['商品名称']):
+                    product_name = str(row['商品名称'])
+                    if product_name and product_name != 'nan':
+                        order['productName'] = product_name.strip()
+                        print(f"📦 订单{valid_order_id}商品名称: {product_name}")
+                    else:
+                        order['productName'] = '无商品信息'
+                else:
+                    order['productName'] = '无商品信息'
                 
                 # 如果有前端操作记录，检查是否需要保护前端操作
                 if has_frontend_operation and frontend_operation:
