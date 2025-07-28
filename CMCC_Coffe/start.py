@@ -59,8 +59,8 @@ def main():
     try:
         # 获取当前脚本所在目录
         script_dir = os.path.dirname(os.path.abspath(__file__))
-        main_path = os.path.join(script_dir, 'main.py')
-        subprocess.run([sys.executable, main_path], check=True)
+        run_path = os.path.join(script_dir, 'run.py')
+        subprocess.run([sys.executable, run_path], check=True)
     except KeyboardInterrupt:
         print("\n👋 系统已停止")
     except Exception as e:

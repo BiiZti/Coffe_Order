@@ -8,8 +8,12 @@ import random
 import pandas as pd
 import glob
 from openpyxl import load_workbook
+from config import config
 
+# 获取环境配置
+env = os.environ.get('FLASK_ENV', 'development')
 app = Flask(__name__)
+app.config.from_object(config[env])
 
 # 订单数据存储
 orders_db = []
@@ -29,6 +33,9 @@ COMPLETED = 5        # 已完成
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 EXCEL_FOLDER = os.path.join(PROJECT_ROOT, "data")  # 从项目data文件夹读取Excel文件
 EXCEL_PATTERN = "*前端咖啡订单*.xlsx"  # 只匹配前端专用咖啡订单Excel文件
+
+# Excel文件操作锁，防止并发写入冲突
+excel_write_lock = threading.Lock()
 
 def ensure_orders_folder():
     """确保桌面路径存在"""
@@ -358,8 +365,8 @@ def background_excel_reader():
         except Exception as e:
             print(f"后台Excel读取出错: {e}")
         
-        # 等待1分钟
-        time.sleep(60)
+        # 使用配置的刷新间隔
+        time.sleep(app.config['DATA_REFRESH_INTERVAL'])
 
 def get_orders_by_status(status=None):
     """根据状态获取订单"""
@@ -429,114 +436,197 @@ def update_order_status(order_id, new_status):
 
 def update_excel_order_status_by_number(order_number, new_status):
     """通过订单编号更新咖啡订单Excel文件中的订单状态"""
-    try:
-        # 查找最新的咖啡订单Excel文件
-        excel_files = glob.glob(os.path.join(EXCEL_FOLDER, EXCEL_PATTERN))
-        if not excel_files:
-            print("❌ 未找到咖啡订单Excel文件，无法更新状态")
-            return False
+    # 使用线程锁防止并发写入冲突
+    with excel_write_lock:
+        max_retries = app.config['EXCEL_RETRY_COUNT']
+        retry_count = 0
         
-        latest_file = max(excel_files, key=os.path.getctime)
-        print(f"📁 更新咖啡订单Excel文件: {latest_file}")
+        while retry_count < max_retries:
+            try:
+                print(f"🔄 尝试更新Excel文件 (第{retry_count + 1}次): 订单{order_number}")
+                
+                # 查找最新的咖啡订单Excel文件
+                excel_files = glob.glob(os.path.join(EXCEL_FOLDER, EXCEL_PATTERN))
+                if not excel_files:
+                    print("❌ 未找到咖啡订单Excel文件，无法更新状态")
+                    return False
+                
+                latest_file = max(excel_files, key=os.path.getctime)
+                print(f"📁 更新咖啡订单Excel文件: {latest_file}")
+                
+                # 检查文件是否存在
+                if not os.path.exists(latest_file):
+                    print(f"❌ Excel文件不存在: {latest_file}")
+                    return False
+                
+                # 检查文件是否可写
+                if not os.access(latest_file, os.W_OK):
+                    print(f"⚠️  咖啡订单Excel文件无写入权限，请检查文件是否被占用或设置为只读")
+                    print(f"   文件路径: {latest_file}")
+                    print(f"   建议操作:")
+                    print(f"   1. 关闭可能打开该文件的Excel程序")
+                    print(f"   2. 右键文件 -> 属性 -> 取消勾选'只读'")
+                    print(f"   3. 以管理员身份运行程序")
+                    
+                    # 尝试修复文件权限
+                    try:
+                        import stat
+                        current_attrs = os.stat(latest_file).st_mode
+                        new_attrs = current_attrs | stat.S_IWRITE
+                        os.chmod(latest_file, new_attrs)
+                        print(f"✅ 已尝试修复文件权限")
+                    except Exception as perm_e:
+                        print(f"❌ 修复文件权限失败: {perm_e}")
+                    
+                    if retry_count < max_retries - 1:
+                        retry_count += 1
+                        time.sleep(app.config['EXCEL_RETRY_DELAY'])  # 使用配置的重试延迟
+                        continue
+                    else:
+                        return False
+                
+                # 先读取Excel文件，找到对应的订单
+                try:
+                    df = pd.read_excel(latest_file, engine='openpyxl')
+                    print(f"📊 Excel文件包含 {len(df)} 行数据")
+                except Exception as read_e:
+                    print(f"❌ 读取Excel文件失败: {read_e}")
+                    if retry_count < max_retries - 1:
+                        retry_count += 1
+                        time.sleep(2)
+                        continue
+                    else:
+                        return False
+                
+                print(f"🎯 目标订单编号: {order_number}")
+                
+                # 在Excel中查找对应的行
+                target_row_index = None
+                for index, row in df.iterrows():
+                    excel_order_number = row.get('订单编号')
+                    if not pd.isna(excel_order_number) and str(excel_order_number) == str(order_number):
+                        target_row_index = index
+                        break
+                
+                if target_row_index is None:
+                    print(f"❌ 在Excel中未找到订单号 {order_number}")
+                    # 打印所有订单编号用于调试
+                    print(f"📋 Excel中的所有订单编号:")
+                    for index, row in df.iterrows():
+                        excel_order_number = row.get('订单编号')
+                        if not pd.isna(excel_order_number):
+                            print(f"   行{index+2}: {excel_order_number}")
+                    return False
+                
+                excel_row_number = target_row_index + 2  # +2 因为Excel从1开始且有标题行
+                print(f"🔍 订单 {order_number} 在Excel第 {excel_row_number} 行")
+                
+                # 使用openpyxl加载工作簿进行更新
+                try:
+                    workbook = load_workbook(latest_file)
+                    worksheet = workbook.active
+                except Exception as load_e:
+                    print(f"❌ 加载Excel工作簿失败: {load_e}")
+                    if retry_count < max_retries - 1:
+                        retry_count += 1
+                        time.sleep(2)
+                        continue
+                    else:
+                        return False
+                
+                # 处理状态更新
+                if isinstance(new_status, str):
+                    status_text = new_status
+                else:
+                    status_mapping = {
+                        PENDING: '备货中',
+                        COMPLETED: '已完成'
+                    }
+                    status_text = status_mapping.get(new_status, '备货中')
+                
+                print(f"🔧 更新Excel: 订单{order_number}, 状态{new_status} -> 文本状态'{status_text}'")
+                
+                # 更新状态列（状态名称是第9列，I列）
+                status_cell = worksheet.cell(row=excel_row_number, column=9)
+                status_cell.value = status_text
+                
+                # 同时更新状态代码列（状态是第8列，H列）
+                status_code_cell = worksheet.cell(row=excel_row_number, column=8)
+                if status_text == '已完成':
+                    status_code_cell.value = '5'
+                else:
+                    status_code_cell.value = '2'
+                
+                # 保存文件
+                print(f"💾 正在保存文件: {latest_file}")
+                try:
+                    workbook.save(latest_file)
+                    print(f"✅ 文件保存成功")
+                except Exception as save_e:
+                    print(f"❌ 保存文件失败: {save_e}")
+                    if retry_count < max_retries - 1:
+                        retry_count += 1
+                        time.sleep(2)
+                        continue
+                    else:
+                        return False
+                
+                # 验证文件是否真的被更新了
+                print(f"🔍 验证文件更新...")
+                try:
+                    verification_df = pd.read_excel(latest_file, engine='openpyxl')
+                    verification_row = verification_df.iloc[target_row_index]
+                    actual_status = verification_row.get('状态名称', 'N/A')
+                    actual_status_code = verification_row.get('状态', 'N/A')
+                    
+                    print(f"📊 验证结果:")
+                    print(f"   期望状态: {status_text}")
+                    print(f"   实际状态: {actual_status}")
+                    print(f"   期望状态码: {'5' if status_text == '已完成' else '2'}")
+                    print(f"   实际状态码: {actual_status_code}")
+                    
+                    if actual_status == status_text:
+                        print(f"✅ 文件更新验证成功！")
+                        print(f"✅ 成功更新咖啡订单Excel文件，订单{order_number}状态改为{status_text}")
+                        return True
+                    else:
+                        print(f"❌ 文件更新验证失败！状态未正确更新")
+                        if retry_count < max_retries - 1:
+                            retry_count += 1
+                            time.sleep(2)
+                            continue
+                        else:
+                            return False
+                except Exception as verify_e:
+                    print(f"❌ 验证文件更新失败: {verify_e}")
+                    if retry_count < max_retries - 1:
+                        retry_count += 1
+                        time.sleep(2)
+                        continue
+                    else:
+                        return False
+                        
+            except PermissionError as e:
+                print(f"❌ 咖啡订单Excel文件权限错误: {e}")
+                print(f"   请确保Excel文件未被其他程序打开，且具有写入权限")
+                if retry_count < max_retries - 1:
+                    retry_count += 1
+                    time.sleep(2)
+                    continue
+                else:
+                    return False
+            except Exception as e:
+                print(f"❌ 更新咖啡订单Excel文件时出错: {e}")
+                import traceback
+                traceback.print_exc()
+                if retry_count < max_retries - 1:
+                    retry_count += 1
+                    time.sleep(2)
+                    continue
+                else:
+                    return False
         
-        # 检查文件是否可写
-        if not os.access(latest_file, os.W_OK):
-            print(f"⚠️  咖啡订单Excel文件无写入权限，请检查文件是否被占用或设置为只读")
-            print(f"   文件路径: {latest_file}")
-            print(f"   建议操作:")
-            print(f"   1. 关闭可能打开该文件的Excel程序")
-            print(f"   2. 右键文件 -> 属性 -> 取消勾选'只读'")
-            print(f"   3. 以管理员身份运行程序")
-            return False
-        
-        # 先读取Excel文件，找到对应的订单
-        df = pd.read_excel(latest_file, engine='openpyxl')
-        print(f"📊 Excel文件包含 {len(df)} 行数据")
-        
-        print(f"🎯 目标订单编号: {order_number}")
-        
-        # 在Excel中查找对应的行
-        target_row_index = None
-        for index, row in df.iterrows():
-            excel_order_number = row.get('订单编号')
-            if not pd.isna(excel_order_number) and str(excel_order_number) == str(order_number):
-                target_row_index = index
-                break
-        
-        if target_row_index is None:
-            print(f"❌ 在Excel中未找到订单号 {order_number}")
-            return False
-        
-        excel_row_number = target_row_index + 2  # +2 因为Excel从1开始且有标题行
-        print(f"🔍 订单 {order_number} 在Excel第 {excel_row_number} 行")
-        
-        # 打印Excel中的所有订单，用于调试
-        print(f"📋 Excel中的订单:")
-        for index, row in df.iterrows():
-            excel_order_number = row.get('订单编号')
-            if not pd.isna(excel_order_number):
-                print(f"   行{index+2}: {excel_order_number}")
-        
-        # 使用openpyxl加载工作簿进行更新
-        workbook = load_workbook(latest_file)
-        worksheet = workbook.active
-        
-        # 处理状态更新
-        if isinstance(new_status, str):
-            status_text = new_status
-        else:
-            status_mapping = {
-                PENDING: '备货中',
-                COMPLETED: '已完成'
-            }
-            status_text = status_mapping.get(new_status, '备货中')
-        
-        print(f"🔧 更新Excel: 订单{order_number}, 状态{new_status} -> 文本状态'{status_text}'")
-        
-        # 更新状态列（状态名称是第9列，I列）
-        status_cell = worksheet.cell(row=excel_row_number, column=9)
-        status_cell.value = status_text
-        
-        # 同时更新状态代码列（状态是第8列，H列）
-        status_code_cell = worksheet.cell(row=excel_row_number, column=8)
-        if status_text == '已完成':
-            status_code_cell.value = '5'
-        else:
-            status_code_cell.value = '2'
-        
-        # 保存文件
-        print(f"💾 正在保存文件: {latest_file}")
-        workbook.save(latest_file)
-        
-        # 验证文件是否真的被更新了
-        print(f"🔍 验证文件更新...")
-        verification_df = pd.read_excel(latest_file, engine='openpyxl')
-        verification_row = verification_df.iloc[target_row_index]
-        actual_status = verification_row.get('状态名称', 'N/A')
-        actual_status_code = verification_row.get('状态', 'N/A')
-        
-        print(f"📊 验证结果:")
-        print(f"   期望状态: {status_text}")
-        print(f"   实际状态: {actual_status}")
-        print(f"   期望状态码: {'5' if status_text == '已完成' else '2'}")
-        print(f"   实际状态码: {actual_status_code}")
-        
-        if actual_status == status_text:
-            print(f"✅ 文件更新验证成功！")
-        else:
-            print(f"❌ 文件更新验证失败！状态未正确更新")
-        
-        print(f"✅ 成功更新咖啡订单Excel文件，订单{order_number}状态改为{status_text}")
-        return True
-            
-    except PermissionError as e:
-        print(f"❌ 咖啡订单Excel文件权限错误: {e}")
-        print(f"   请确保Excel文件未被其他程序打开，且具有写入权限")
-        return False
-    except Exception as e:
-        print(f"❌ 更新咖啡订单Excel文件时出错: {e}")
-        import traceback
-        traceback.print_exc()
+        print(f"❌ 更新Excel文件失败，已重试{max_retries}次")
         return False
 
 def update_excel_order_status(order_id, new_status):
@@ -666,6 +756,19 @@ def update_excel_order_status(order_id, new_status):
         traceback.print_exc()
         return False
 
+# 错误处理中间件
+@app.errorhandler(500)
+def internal_error(error):
+    """处理内部服务器错误"""
+    print(f"❌ 服务器内部错误: {error}")
+    return jsonify({'code': 0, 'msg': '服务器内部错误，请稍后重试'}), 500
+
+@app.errorhandler(503)
+def service_unavailable(error):
+    """处理服务不可用错误"""
+    print(f"❌ 服务不可用: {error}")
+    return jsonify({'code': 0, 'msg': '服务暂时不可用，请稍后重试'}), 503
+
 # Flask路由定义
 @app.route('/')
 def index():
@@ -695,9 +798,32 @@ def api_all_orders():
 def api_update_order(order_id, action):
     """更新订单状态"""
     print(f"🔔 收到API请求: 订单{order_id}, 动作: {action}")
+    
+    # 添加请求频率限制检查
+    current_time = time.time()
+    request_key = f"{order_id}_{action}"
+    
+    # 检查是否在配置的时间内重复请求
+    if hasattr(app, 'last_requests'):
+        if request_key in app.last_requests:
+            last_time = app.last_requests[request_key]
+            if current_time - last_time < app.config['REQUEST_RATE_LIMIT']:
+                print(f"⚠️  请求过于频繁: 订单{order_id}, 动作: {action}")
+                return jsonify({'code': 0, 'msg': '请求过于频繁，请稍后再试'})
+    else:
+        app.last_requests = {}
+    
+    app.last_requests[request_key] = current_time
+    
     try:
         if action == 'complete':
             print(f"🔄 开始处理完成订单请求: 订单{order_id}")
+            
+            # 检查Excel是否正在被外部程序更新
+            if is_excel_updating:
+                print(f"⚠️  订单{order_id}状态更新被拒绝：咖啡订单Excel文件正在被外部程序更新")
+                return jsonify({'code': 0, 'msg': '系统繁忙，请稍后再试'})
+            
             success, message = update_order_status(order_id, '已完成')
             print(f"📊 处理结果: 成功={success}, 消息={message}")
             
@@ -977,4 +1103,11 @@ def init_app():
 
 def run_app():
     """运行Flask应用"""
-    app.run(debug=False, host='0.0.0.0', port=5000) 
+    # 使用配置文件中的参数
+    app.run(
+        debug=app.config['DEBUG'],
+        host=app.config['HOST'],
+        port=app.config['PORT'],
+        threaded=app.config['THREADED'],
+        processes=app.config['PROCESSES']
+    ) 

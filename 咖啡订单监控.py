@@ -56,18 +56,39 @@ chrome_options.add_argument("--disable-dev-shm-usage")
 # 尝试禁用下载栏（使用更兼容的选项）
 chrome_options.add_argument("--disable-features=DownloadBubble")
 chrome_options.add_argument("--disable-features=DownloadShelf")
+# 添加连接池配置，解决connection pool问题
+chrome_options.add_argument("--disable-background-timer-throttling")
+chrome_options.add_argument("--disable-backgrounding-occluded-windows")
+chrome_options.add_argument("--disable-renderer-backgrounding")
+chrome_options.add_argument("--disable-features=TranslateUI")
+chrome_options.add_argument("--disable-ipc-flooding-protection")
 # 移除不兼容的Chrome选项
 # chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
 # chrome_options.add_experimental_option('useAutomationExtension', False)
-try:
-    # 尝试使用本地ChromeDriver
-    service = Service("chromedriver.exe")
-    driver = webdriver.Chrome(service=service, options=chrome_options)
-    print("✅ 使用本地ChromeDriver连接到Chrome浏览器")
-except Exception as e:
-    print(f"❌ 本地ChromeDriver连接失败: {e}")
-    print("💡 请确保已运行 start_chrome.py 启动Chrome浏览器")
-    raise Exception("无法连接到Chrome浏览器，请先运行 start_chrome.py")
+# 连接重试机制
+max_retries = 3
+retry_count = 0
+driver = None
+
+while retry_count < max_retries and driver is None:
+    try:
+        print(f"🔄 尝试连接Chrome浏览器 (第{retry_count + 1}次)...")
+        # 尝试使用本地ChromeDriver
+        service = Service("chromedriver.exe")
+        # 配置ChromeDriver连接池参数
+        service.creation_flags = 0x08000000  # 禁用控制台窗口
+        driver = webdriver.Chrome(service=service, options=chrome_options)
+        print("✅ 使用本地ChromeDriver连接到Chrome浏览器")
+        break
+    except Exception as e:
+        retry_count += 1
+        print(f"❌ 本地ChromeDriver连接失败 (第{retry_count}次): {e}")
+        if retry_count < max_retries:
+            print(f"⏳ 等待3秒后重试...")
+            time.sleep(3)
+        else:
+            print("💡 请确保已运行 start_chrome.py 启动Chrome浏览器")
+            raise Exception("无法连接到Chrome浏览器，请先运行 start_chrome.py")
 
 root = tk.Tk()
 root.withdraw()
@@ -122,6 +143,26 @@ lock_manager = FileLockManager(os.path.join(project_data_dir, "data.lock"))
 
 # 全局最小化监控标志
 minimize_monitor_active = False
+
+def cleanup_connections():
+    """清理连接池"""
+    try:
+        # 清理Selenium连接
+        if 'driver' in globals() and driver:
+            try:
+                driver.quit()
+            except:
+                pass
+        # 清理其他可能的连接
+        import gc
+        gc.collect()
+        print("🧹 已清理连接池")
+    except Exception as e:
+        print(f"⚠️ 清理连接池时出错: {e}")
+
+# 注册程序退出时的清理函数
+import atexit
+atexit.register(cleanup_connections)
 
 
 def start_minimize_monitor():
@@ -863,6 +904,11 @@ def do_check():
         click_export_button()
     except Exception as e:
         logging.exception("❌ 点击页面元素失败")
+        # 如果是connection pool错误，尝试清理连接
+        if "connection pool is full" in str(e).lower():
+            print("🔄 检测到连接池问题，尝试清理连接...")
+            cleanup_connections()
+            time.sleep(2)
         root.after(30000, do_check)
         return
 
