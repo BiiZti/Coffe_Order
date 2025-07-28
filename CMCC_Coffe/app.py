@@ -83,6 +83,40 @@ def ensure_excel_files_writable():
     except Exception as e:
         print(f"❌ 检查Excel文件权限时出错: {e}")
 
+def get_latest_file_by_date(excel_files):
+    """根据文件名中的日期选择最新的Excel文件"""
+    import re
+    
+    latest_file = None
+    latest_date_str = None
+    
+    for file_path in excel_files:
+        file_name = os.path.basename(file_path)
+        
+        # 匹配文件名中的日期格式：YYYYMMDD_
+        match = re.search(r'(\d{8})_', file_name)
+        if match:
+            date_str = match.group(1)  # 获取8位数字日期
+            
+            # 直接字符串比较，因为YYYYMMDD格式的字符串比较就是日期比较
+            if latest_date_str is None or date_str > latest_date_str:
+                latest_date_str = date_str
+                latest_file = file_path
+    
+    if latest_file is None:
+        # 如果没有找到日期格式的文件，回退到修改时间
+        latest_file = max(excel_files, key=os.path.getmtime)
+        print(f"⚠️ 未找到日期格式的文件名，使用修改时间选择: {os.path.basename(latest_file)}")
+    else:
+        # 格式化显示日期
+        year = latest_date_str[:4]
+        month = latest_date_str[4:6]
+        day = latest_date_str[6:8]
+        formatted_date = f"{year}-{month}-{day}"
+        print(f"📅 根据日期选择最新文件: {os.path.basename(latest_file)} (日期: {formatted_date})")
+    
+    return latest_file
+
 def map_order_status(status_text):
     """映射订单状态文本到数字状态"""
     status_map = {
@@ -146,8 +180,8 @@ def read_excel_orders():
             orders_db = []
             return
         
-        # 读取最新的咖啡订单Excel文件
-        latest_file = max(excel_files, key=os.path.getctime)
+        # 读取最新的咖啡订单Excel文件（按修改时间排序）
+        latest_file = get_latest_file_by_date(excel_files)
         
         # 检查文件是否存在
         if not os.path.exists(latest_file):
@@ -451,7 +485,7 @@ def update_excel_order_status_by_number(order_number, new_status):
                     print("❌ 未找到咖啡订单Excel文件，无法更新状态")
                     return False
                 
-                latest_file = max(excel_files, key=os.path.getctime)
+                latest_file = get_latest_file_by_date(excel_files)
                 print(f"📁 更新咖啡订单Excel文件: {latest_file}")
                 
                 # 检查文件是否存在
@@ -638,7 +672,7 @@ def update_excel_order_status(order_id, new_status):
             print("❌ 未找到咖啡订单Excel文件，无法更新状态")
             return False
         
-        latest_file = max(excel_files, key=os.path.getctime)
+        latest_file = get_latest_file_by_date(excel_files)
         print(f"📁 更新咖啡订单Excel文件: {latest_file}")
         
         # 检查文件是否可写
@@ -900,7 +934,7 @@ def api_excel_info():
         excel_files = glob.glob(os.path.join(EXCEL_FOLDER, EXCEL_PATTERN))
         
         if excel_files:
-            latest_file = max(excel_files, key=os.path.getctime)
+            latest_file = get_latest_file_by_date(excel_files)
             file_info = {
                 'file_name': os.path.basename(latest_file),
                 'file_path': latest_file,
@@ -939,7 +973,7 @@ def api_excel_status():
         excel_files = glob.glob(os.path.join(EXCEL_FOLDER, EXCEL_PATTERN))
         
         if excel_files:
-            latest_file = max(excel_files, key=os.path.getctime)
+            latest_file = get_latest_file_by_date(excel_files)
             # 读取咖啡订单Excel文件获取最新状态
             df = pd.read_excel(latest_file, engine='openpyxl')
             

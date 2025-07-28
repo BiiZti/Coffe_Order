@@ -214,13 +214,28 @@ def is_valid_xlsx(path):
         return False
     
     try:
-        # 尝试用pandas读取文件
-        df = pd.read_excel(path, nrows=1)  # 只读取第一行来验证
+        # 尝试使用openpyxl引擎读取文件
+        df = pd.read_excel(path, engine='openpyxl', nrows=1)  # 只读取第一行来验证
         print(f"✅ Excel文件有效: {os.path.basename(path)}")
         return True
-    except Exception as e:
-        print(f"❌ Excel文件无效 {os.path.basename(path)}: {e}")
-        return False
+    except Exception as e1:
+        try:
+            # 如果openpyxl失败，尝试使用xlrd引擎
+            df = pd.read_excel(path, engine='xlrd', nrows=1)
+            print(f"✅ Excel文件有效 (xlrd): {os.path.basename(path)}")
+            return True
+        except Exception as e2:
+            try:
+                # 如果xlrd也失败，尝试不指定引擎
+                df = pd.read_excel(path, nrows=1)
+                print(f"✅ Excel文件有效 (自动): {os.path.basename(path)}")
+                return True
+            except Exception as e3:
+                print(f"❌ Excel文件无效 {os.path.basename(path)}:")
+                print(f"   openpyxl错误: {e1}")
+                print(f"   xlrd错误: {e2}")
+                print(f"   自动选择错误: {e3}")
+                return False
 
 
 def cleanup_old_data():
@@ -721,7 +736,24 @@ def get_status_name(status_code):
 
 
 def process_excel(file_path):
-    df = pd.read_excel(file_path)
+    try:
+        # 尝试使用openpyxl引擎读取Excel文件
+        df = pd.read_excel(file_path, engine='openpyxl')
+    except Exception as e1:
+        try:
+            # 如果openpyxl失败，尝试使用xlrd引擎
+            df = pd.read_excel(file_path, engine='xlrd')
+        except Exception as e2:
+            try:
+            # 如果xlrd也失败，尝试不指定引擎（让pandas自动选择）
+                df = pd.read_excel(file_path)
+            except Exception as e3:
+                print(f"❌ 所有Excel读取方法都失败:")
+                print(f"   openpyxl错误: {e1}")
+                print(f"   xlrd错误: {e2}")
+                print(f"   自动选择错误: {e3}")
+                raise Exception(f"无法读取Excel文件: {file_path}")
+    
     df.columns = [col.strip() for col in df.columns]
 
     if '订单分类' not in df.columns or '订单编号' not in df.columns:
@@ -798,11 +830,25 @@ def update_frontend_excel(new_coffee_df):
             existing_df = None
             if os.path.exists(frontend_excel_path) and is_valid_xlsx(frontend_excel_path):
                 try:
-                    existing_df = pd.read_excel(frontend_excel_path)
+                    # 尝试使用openpyxl引擎读取Excel文件
+                    existing_df = pd.read_excel(frontend_excel_path, engine='openpyxl')
                     print(f"📄 读取现有前端Excel文件，包含 {len(existing_df)} 条记录")
-                except Exception as e:
-                    print(f"⚠️ 读取现有前端Excel失败: {e}")
-                    existing_df = None
+                except Exception as e1:
+                    try:
+                        # 如果openpyxl失败，尝试使用xlrd引擎
+                        existing_df = pd.read_excel(frontend_excel_path, engine='xlrd')
+                        print(f"📄 使用xlrd引擎读取现有前端Excel文件，包含 {len(existing_df)} 条记录")
+                    except Exception as e2:
+                        try:
+                            # 如果xlrd也失败，尝试不指定引擎
+                            existing_df = pd.read_excel(frontend_excel_path)
+                            print(f"📄 使用自动引擎读取现有前端Excel文件，包含 {len(existing_df)} 条记录")
+                        except Exception as e3:
+                            print(f"⚠️ 读取现有前端Excel失败:")
+                            print(f"   openpyxl错误: {e1}")
+                            print(f"   xlrd错误: {e2}")
+                            print(f"   自动选择错误: {e3}")
+                            existing_df = None
             
             # 创建新的DataFrame用于前端
             frontend_data = []
