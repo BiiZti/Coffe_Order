@@ -376,6 +376,18 @@ def read_excel_orders():
                 else:
                     order['productName'] = '无商品信息'
                 
+                # 处理份数信息
+                if '份数' in row and pd.notna(row['份数']):
+                    try:
+                        quantity = int(row['份数'])
+                        order['quantity'] = quantity
+                        print(f"📊 订单{valid_order_id}份数: {quantity}")
+                    except (ValueError, TypeError):
+                        order['quantity'] = 1
+                        print(f"⚠️ 订单{valid_order_id}份数格式错误，使用默认值1")
+                else:
+                    order['quantity'] = 1
+                
                 # 如果有前端操作记录，检查是否需要保护前端操作
                 if has_frontend_operation and frontend_operation:
                     # 使用订单编号查找现有订单

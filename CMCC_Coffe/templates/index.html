@@ -462,6 +462,23 @@
             cursor: help;
         }
 
+        /* 份数样式 */
+        .quantity-info {
+            text-align: center;
+            font-weight: bold;
+            color: #495057;
+            background: #e9ecef;
+            border-radius: 4px;
+            padding: 2px 6px;
+            min-width: 30px;
+            display: inline-block;
+        }
+
+        .quantity-info.multiple {
+            background: #ff6b35;
+            color: white;
+        }
+
         /* 备注信息样式 */
         .remark-info {
             max-width: 150px;
@@ -770,6 +787,7 @@
                             <th>订单号</th>
                             <th>订单状态</th>
                             <th>商品名称</th>
+                            <th>份数</th>
                             <th>用户名</th>
                             <th>手机号</th>
                             <th>地址</th>
@@ -781,7 +799,7 @@
                     </thead>
                     <tbody id="orders-tbody">
                         <tr>
-                            <td colspan="10">
+                            <td colspan="11">
             <div class="loading">
                 <div class="spinner"></div>
                 <p>正在加载订单...</p>
@@ -965,7 +983,7 @@
             if (orders.length === 0) {
                 tbody.innerHTML = `
                     <tr>
-                        <td colspan="10" style="text-align: center; padding: 40px; color: #666;">
+                        <td colspan="11" style="text-align: center; padding: 40px; color: #666;">
                             <i class="fas fa-inbox" style="font-size: 48px; margin-bottom: 10px; color: #ddd;"></i>
                             <p>暂无订单数据</p>
                         </td>
@@ -993,6 +1011,12 @@
                 dishesText = order.orderCategory;
             }
             
+            // 处理份数显示
+            let quantityText = '1';
+            if (order.quantity && order.quantity > 1) {
+                quantityText = order.quantity.toString();
+            }
+            
             // 处理备注信息显示
             let remarkText = order.remark || '无备注';
             let remarkClass = 'remark-info';
@@ -1016,6 +1040,7 @@
                     <td>${order.number}</td>
                     <td><span class="status-badge ${statusClass}">${statusText}</span></td>
                     <td class="dishes-info" title="${dishesText}">${dishesText.length > 30 ? dishesText.substring(0, 30) + '...' : dishesText}</td>
+                    <td><span class="quantity-info ${order.quantity > 1 ? 'multiple' : ''}">${quantityText}</span></td>
                     <td>${order.userName || '未知'}</td>
                     <td>${order.phone || '未知'}</td>
                     <td title="${order.address || '未知'}">${(order.address || '未知').length > 20 ? (order.address || '未知').substring(0, 20) + '...' : (order.address || '未知')}</td>
