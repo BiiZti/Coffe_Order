@@ -55,7 +55,7 @@ LOGIN_WINDOW_WIDTH = 1200  # 登录窗口宽度
 LOGIN_WINDOW_HEIGHT = 800  # 登录窗口高度
 
 # ==== 门店配置 ====
-STORE_NUMBER = "s100023(邮政平台产品)"  # 门店编号（邮政平台产品）
+STORE_NUMBER = "s125072900754(园林路咖啡吧)"  # 门店编号（园林路咖啡吧）
 
 chrome_options = Options()
 chrome_options.add_experimental_option("debuggerAddress", "127.0.0.1:80")
@@ -161,6 +161,9 @@ lock_manager = FileLockManager(os.path.join(project_data_dir, "data.lock"))
 
 # 全局最小化监控标志
 minimize_monitor_active = False
+
+# 全局门店编号设置标志
+store_number_set = False
 
 def cleanup_connections():
     """清理连接池"""
@@ -465,15 +468,16 @@ def click_waimai_menu():
 
 def set_store_number():
     """设置门店编号"""
+    global store_number_set
+    if store_number_set:
+        print("✅ 门店编号已设置，跳过重复设置")
+        return True
+
     try:
         print("🏪 设置门店编号...")
         
-        # 暂时恢复窗口可见状态，方便操作
-        print("🔄 暂时恢复窗口可见状态...")
-        # 移动窗口到可见位置而不是最大化，保持页面布局
-        driver.set_window_position(100, 100)
-        driver.set_window_size(1200, 800)
-        time.sleep(0.5)  # 减少等待时间
+        # 保持窗口隐藏状态，直接进行操作
+        print("🔄 在隐藏状态下设置门店编号...")
         
         # 等待页面完全加载
         time.sleep(1.5)  # 减少等待时间
@@ -503,38 +507,24 @@ def set_store_number():
         # 直接输入门店编号名称
         print(f"⌨️ 输入门店编号: {STORE_NUMBER}")
         store_input.send_keys(STORE_NUMBER)
-        time.sleep(1.5)  # 减少等待时间，但保持足够时间让下拉选项出现
+        time.sleep(1.0)  # 等待输入完成
         
-        # 查找并点击下拉选项中的门店编号
-        print("🔍 查找下拉选项...")
-        store_option = WebDriverWait(driver, 8).until(  # 减少超时时间
-            EC.element_to_be_clickable((By.XPATH, f"//li[contains(@class, 'el-select-dropdown__item')]//span[text()='{STORE_NUMBER}']"))
-        )
-        
-        print("✅ 找到目标选项")
-        
-        # 点击选项确认选择
-        print("🖱️ 点击确认选择...")
-        driver.execute_script("arguments[0].click();", store_option)
-        time.sleep(0.8)  # 减少等待时间
+        # 使用键盘操作选择选项：方向下键 + 回车
+        print("⌨️ 使用键盘选择选项...")
+        from selenium.webdriver.common.keys import Keys
+        store_input.send_keys(Keys.ARROW_DOWN)  # 按下方向下键
+        time.sleep(0.5)  # 短暂等待
+        store_input.send_keys(Keys.ENTER)  # 按回车确认选择
+        time.sleep(0.8)  # 等待选择完成
         
         print(f"✅ 已设置门店编号: {STORE_NUMBER}")
-        
-        # 设置完成后恢复后台模式
-        print("🔄 恢复后台模式...")
-        setup_background_window()
+        store_number_set = True
         
         return True
         
     except Exception as e:
         print(f"❌ 设置门店编号失败: {e}")
         print(f"🔍 错误详情: {type(e).__name__}")
-        
-        # 即使失败也要恢复后台模式
-        try:
-            setup_background_window()
-        except:
-            pass
         
         return False
 
@@ -1159,20 +1149,11 @@ def do_check():
             root.after(60000, do_check)  # 1分钟后重试
             return
         
-        # 设置门店编号（暂时停止最小化监控）
-        print("⏸️ 暂时停止最小化监控...")
-        stop_minimize_monitor()
-        
+        # 只在第一次运行时设置门店编号
         if not set_store_number():
             print("❌ 设置门店编号失败，重试中...")
-            # 重新启动最小化监控
-            start_minimize_monitor()
             root.after(30000, do_check)
             return
-        
-        # 重新启动最小化监控
-        print("▶️ 重新启动最小化监控...")
-        start_minimize_monitor()
         
         # 确保在后台点击按钮
         ensure_background_operation()
@@ -1244,8 +1225,9 @@ def start_program():
     print("=" * 50)
     print("📋 程序功能：")
     print("   • 自动监控外卖系统中的咖啡订单")
-    print("   • 自动设置门店编号: s100023(邮政平台产品)")
-    print("   • 每30秒检测一次新订单（快速响应）")
+    print("   • 自动设置门店编号: s125072900754(园林路咖啡吧)")
+    print("   • 门店编号仅首次设置，后续自动跳过")
+    print("   • 每5秒检测一次新订单（极速响应）")
     print("   • 自动筛选咖啡类订单")
     print("   • 声音提示（无弹窗干扰）")
     print("   • 自动管理Excel文件")
