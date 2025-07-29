@@ -1003,7 +1003,30 @@
             // 处理商品名称显示
             let dishesText = '无商品信息';
             if (order.productName) {
-                dishesText = order.productName;
+                // 检查是否是数组或列表
+                if (Array.isArray(order.productName)) {
+                    dishesText = order.productName.join(' + ');
+                } else if (typeof order.productName === 'string') {
+                    // 检查是否是字符串形式的数组
+                    if (order.productName.startsWith('[') && order.productName.endsWith(']')) {
+                        try {
+                            // 尝试解析JSON数组
+                            const productArray = JSON.parse(order.productName);
+                            if (Array.isArray(productArray)) {
+                                dishesText = productArray.join(' + ');
+                            } else {
+                                dishesText = order.productName;
+                            }
+                        } catch (e) {
+                            // 如果解析失败，直接使用原字符串
+                            dishesText = order.productName;
+                        }
+                    } else {
+                        dishesText = order.productName;
+                    }
+                } else {
+                    dishesText = String(order.productName);
+                }
             } else if (order.dishes && order.dishes.length > 0) {
                 dishesText = order.dishes.map(dish => dish.name).join(', ');
             } else if (order.orderCategory) {

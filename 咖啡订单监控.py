@@ -1122,8 +1122,11 @@ def update_frontend_excel(new_coffee_df):
                                 product_display = ' + '.join(product_parts)
                             else:
                                 product_display = ' + '.join(product_name)
+                        elif isinstance(product_name, list) and len(product_name) == 1:
+                            # 单商品列表，提取第一个元素
+                            product_display = str(product_name[0])
                         else:
-                            product_display = product_name
+                            product_display = str(product_name) if product_name else '无商品信息'
                         
                         if actual_price > 0:
                             print(f"💰 订单{order_id}的实际价格: ¥{actual_price}")
