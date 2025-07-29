@@ -848,7 +848,7 @@ def load_price_and_product_data_from_all_orders():
         
         if not os.path.exists(all_orders_path):
             print("⚠️ 所有外卖订单文件不存在，无法加载价格和商品数据")
-            return {}, {}, {}
+            return {}, {}, {}, {}
         
         print(f"📊 读取所有外卖订单文件: {all_orders_filename}")
         
@@ -866,50 +866,94 @@ def load_price_and_product_data_from_all_orders():
                     print(f"   openpyxl错误: {e1}")
                     print(f"   xlrd错误: {e2}")
                     print(f"   自动选择错误: {e3}")
-                    return {}, {}, {}
+                    return {}, {}, {}, {}
         
         print(f"✅ 成功读取所有外卖订单文件，数据行数: {len(df)}")
         
         # 创建订单编号到实际支付金额的映射
         price_mapping = {}
-        # 创建订单编号到商品名称的映射
+        # 创建订单编号到商品名称的映射（支持多商品）
         product_mapping = {}
-        # 创建订单编号到份数的映射
+        # 创建订单编号到份数的映射（支持多商品）
         quantity_mapping = {}
+        # 创建订单编号到商品详细信息的映射（包含每个商品的份数）
+        product_details_mapping = {}
+        
+        current_order_number = None
         
         for index, row in df.iterrows():
             try:
+                # 获取订单编号
                 order_number = row.get('订单编号')
-                actual_payment = row.get('实际支付金额')
-                # 从Unnamed: 39列获取商品名称（这是嵌套在订单详情中的商品名称）
-                product_name = row.get('Unnamed: 39')
-                # 从Unnamed: 40列获取份数
-                quantity = row.get('Unnamed: 40')
+                if pd.notna(order_number) and str(order_number).strip():
+                    current_order_number = str(order_number).strip()
                 
-                if pd.notna(order_number):
-                    order_number_str = str(order_number)
+                # 如果没有当前订单编号，跳过
+                if not current_order_number:
+                    continue
+                
+                # 获取商品信息（从Unnamed: 39列）
+                product_name = row.get('Unnamed: 39')
+                # 获取份数（从Unnamed: 40列）
+                quantity = row.get('Unnamed: 40')
+                # 获取实际支付金额
+                actual_payment = row.get('实际支付金额')
+                
+                # 处理价格数据（只在有订单编号的行处理）
+                if pd.notna(order_number) and pd.notna(actual_payment):
+                    try:
+                        actual_payment_float = float(actual_payment)
+                        price_mapping[current_order_number] = actual_payment_float
+                        print(f"💰 订单{current_order_number}的实际价格: ¥{actual_payment_float}")
+                    except (ValueError, TypeError):
+                        print(f"⚠️ 订单{current_order_number}的实际支付金额格式错误: {actual_payment}")
+                
+                # 处理商品名称数据
+                if pd.notna(product_name) and str(product_name).strip() != '商品名称' and str(product_name).strip():
+                    product_name_clean = str(product_name).strip()
                     
-                    # 处理价格数据
-                    if pd.notna(actual_payment):
-                        try:
-                            actual_payment_float = float(actual_payment)
-                            price_mapping[order_number_str] = actual_payment_float
-                        except (ValueError, TypeError):
-                            print(f"⚠️ 订单{order_number}的实际支付金额格式错误: {actual_payment}")
+                    # 如果订单已有商品，追加新商品
+                    if current_order_number in product_mapping:
+                        existing_products = product_mapping[current_order_number]
+                        if isinstance(existing_products, str):
+                            existing_products = [existing_products]
+                        existing_products.append(product_name_clean)
+                        product_mapping[current_order_number] = existing_products
+                    else:
+                        product_mapping[current_order_number] = [product_name_clean]
                     
-                    # 处理商品名称数据
-                    if pd.notna(product_name) and str(product_name).strip() != '商品名称':
-                        product_mapping[order_number_str] = str(product_name).strip()
-                        print(f"📦 订单{order_number}的商品名称: {product_name}")
+                    # 保存商品详细信息（包含份数）
+                    if current_order_number not in product_details_mapping:
+                        product_details_mapping[current_order_number] = []
                     
-                    # 处理份数数据
+                    # 获取当前商品的份数
+                    current_quantity = 1
                     if pd.notna(quantity) and str(quantity).strip() != '份数':
                         try:
-                            quantity_int = int(quantity)
-                            quantity_mapping[order_number_str] = quantity_int
-                            print(f"📊 订单{order_number}的份数: {quantity}")
+                            current_quantity = int(quantity)
                         except (ValueError, TypeError):
-                            print(f"⚠️ 订单{order_number}的份数格式错误: {quantity}")
+                            current_quantity = 1
+                    
+                    # 添加商品详细信息
+                    product_details_mapping[current_order_number].append({
+                        'name': product_name_clean,
+                        'quantity': current_quantity
+                    })
+                    
+                    print(f"📦 订单{current_order_number}的商品名称: {product_name_clean} (份数: {current_quantity})")
+                
+                # 处理份数数据
+                if pd.notna(quantity) and str(quantity).strip() != '份数':
+                    try:
+                        quantity_int = int(quantity)
+                        # 如果订单已有份数，累加新份数
+                        if current_order_number in quantity_mapping:
+                            quantity_mapping[current_order_number] += quantity_int
+                        else:
+                            quantity_mapping[current_order_number] = quantity_int
+                        print(f"📊 订单{current_order_number}的份数: {quantity} (累计: {quantity_mapping[current_order_number]})")
+                    except (ValueError, TypeError):
+                        print(f"⚠️ 订单{current_order_number}的份数格式错误: {quantity}")
                         
             except Exception as e:
                 print(f"处理第{index + 1}行数据时出错: {e}")
@@ -918,13 +962,13 @@ def load_price_and_product_data_from_all_orders():
         print(f"💰 成功加载 {len(price_mapping)} 个订单的价格数据")
         print(f"📦 成功加载 {len(product_mapping)} 个订单的商品名称数据")
         print(f"📊 成功加载 {len(quantity_mapping)} 个订单的份数数据")
-        return price_mapping, product_mapping, quantity_mapping
+        return price_mapping, product_mapping, quantity_mapping, product_details_mapping
         
     except Exception as e:
         print(f"❌ 读取所有外卖订单文件时出错: {e}")
         import traceback
         traceback.print_exc()
-        return {}, {}, {}
+        return {}, {}, {}, {}
 
 def update_frontend_excel(new_coffee_df):
     """更新前端专用Excel文件，通过订单号同步，并添加价格数据"""
@@ -948,7 +992,7 @@ def update_frontend_excel(new_coffee_df):
         
         # 加载价格和商品名称数据
         print("💰 开始加载价格、商品名称和份数数据...")
-        price_mapping, product_mapping, quantity_mapping = load_price_and_product_data_from_all_orders()
+        price_mapping, product_mapping, quantity_mapping, product_details_mapping = load_price_and_product_data_from_all_orders()
         
         # 获取文件锁
         if not lock_manager.acquire_lock(timeout=15):
@@ -997,57 +1041,140 @@ def update_frontend_excel(new_coffee_df):
                     actual_price = price_mapping.get(order_id, 0.0)
                     product_name = product_mapping.get(order_id, '无商品信息')
                     quantity = quantity_mapping.get(order_id, 1)  # 默认份数为1
+                    product_details = product_details_mapping.get(order_id, [])
                     
-                    if actual_price > 0:
-                        print(f"💰 订单{order_id}的实际价格: ¥{actual_price}")
-                    if product_name != '无商品信息':
-                        print(f"📦 订单{order_id}的商品名称: {product_name}")
-                    if quantity > 1:
-                        print(f"📊 订单{order_id}的份数: {quantity}")
-                    
-                    # 检查是否已存在
-                    existing_row = None
-                    if existing_df is not None and '订单编号' in existing_df.columns:
-                        existing_matches = existing_df[existing_df['订单编号'].astype(str).str.strip() == order_id]
-                        if not existing_matches.empty:
-                            existing_row = existing_matches.iloc[0]
-                    
-                    if existing_row is not None:
-                        # 使用现有状态，更新其他信息
-                        existing_status = str(existing_row.get('状态', '2'))
-                        status_name = get_status_name(existing_status)
-                        frontend_row = {
-                            '订单编号': order_id,
-                            '手机号码': str(new_row.get('手机号码', '')).strip(),
-                            '姓名': str(new_row.get('姓名', '')).strip(),
-                            '部门': str(new_row.get('部门', '')).strip(),
-                            '支付时间': str(new_row.get('支付时间', '')).strip(),
-                            '商品名称': product_name,  # 使用从所有外卖订单获取的商品名称
-                            '份数': quantity,  # 添加份数
-                            '订单备注': str(new_row.get('订单备注', '')).strip(),
-                            '状态': existing_status,  # 保持现有状态
-                            '状态名称': status_name,  # 添加状态名称
-                            '实际价格': actual_price  # 添加实际价格
-                        }
-                        print(f"🔄 更新订单: {order_id} (保持状态: {status_name}, 价格: ¥{actual_price}, 商品: {product_name}, 份数: {quantity})")
+                    # 处理多商品订单拆分
+                    if isinstance(product_name, list) and len(product_name) > 1 and product_details:
+                        # 多商品订单，拆分成多个独立订单
+                        print(f"🔄 拆分多商品订单: {order_id}")
+                        
+                        for i, detail in enumerate(product_details):
+                            # 为每个商品创建独立的订单行
+                            split_order_id = f"{order_id}-{i+1}"
+                            product_display = detail['name']
+                            if detail['quantity'] > 1:
+                                product_display = f"{detail['name']}×{detail['quantity']}"
+                            
+                            # 计算该商品的价格（按份数分配）
+                            if actual_price > 0 and len(product_details) > 1:
+                                # 计算总份数
+                                total_quantity = sum(detail['quantity'] for detail in product_details)
+                                # 按份数比例分配价格
+                                split_price = (actual_price / total_quantity) * detail['quantity']
+                            else:
+                                split_price = actual_price
+                            
+                            # 检查是否已存在
+                            existing_row = None
+                            if existing_df is not None and '订单编号' in existing_df.columns:
+                                existing_matches = existing_df[existing_df['订单编号'].astype(str).str.strip() == split_order_id]
+                                if not existing_matches.empty:
+                                    existing_row = existing_matches.iloc[0]
+                            
+                            if existing_row is not None:
+                                # 使用现有状态，更新其他信息
+                                existing_status = str(existing_row.get('状态', '2'))
+                                status_name = get_status_name(existing_status)
+                                frontend_row = {
+                                    '订单编号': split_order_id,
+                                    '手机号码': str(new_row.get('手机号码', '')).strip(),
+                                    '姓名': str(new_row.get('姓名', '')).strip(),
+                                    '部门': str(new_row.get('部门', '')).strip(),
+                                    '支付时间': str(new_row.get('支付时间', '')).strip(),
+                                    '商品名称': product_display,
+                                    '份数': detail['quantity'],
+                                    '订单备注': str(new_row.get('订单备注', '')).strip(),
+                                    '状态': existing_status,
+                                    '状态名称': status_name,
+                                    '实际价格': split_price
+                                }
+                                print(f"🔄 更新拆分订单: {split_order_id} (商品: {product_display}, 份数: {detail['quantity']}, 价格: ¥{split_price})")
+                            else:
+                                # 新拆分订单
+                                frontend_row = {
+                                    '订单编号': split_order_id,
+                                    '手机号码': str(new_row.get('手机号码', '')).strip(),
+                                    '姓名': str(new_row.get('姓名', '')).strip(),
+                                    '部门': str(new_row.get('部门', '')).strip(),
+                                    '支付时间': str(new_row.get('支付时间', '')).strip(),
+                                    '商品名称': product_display,
+                                    '份数': detail['quantity'],
+                                    '订单备注': str(new_row.get('订单备注', '')).strip(),
+                                    '状态': '2',
+                                    '状态名称': '备货中',
+                                    '实际价格': split_price
+                                }
+                                print(f"🆕 新增拆分订单: {split_order_id} (商品: {product_display}, 份数: {detail['quantity']}, 价格: ¥{split_price})")
+                            
+                            frontend_data.append(frontend_row)
+                        
                     else:
-                        # 新订单
-                        frontend_row = {
-                            '订单编号': order_id,
-                            '手机号码': str(new_row.get('手机号码', '')).strip(),
-                            '姓名': str(new_row.get('姓名', '')).strip(),
-                            '部门': str(new_row.get('部门', '')).strip(),
-                            '支付时间': str(new_row.get('支付时间', '')).strip(),
-                            '商品名称': product_name,  # 使用从所有外卖订单获取的商品名称
-                            '份数': quantity,  # 添加份数
-                            '订单备注': str(new_row.get('订单备注', '')).strip(),
-                            '状态': '2',  # 默认备货中状态
-                            '状态名称': '备货中',  # 添加状态名称
-                            '实际价格': actual_price  # 添加实际价格
-                        }
-                        print(f"🆕 新增订单: {order_id} (状态: 备货中, 价格: ¥{actual_price}, 商品: {product_name}, 份数: {quantity})")
-                    
-                    frontend_data.append(frontend_row)
+                        # 单商品订单，正常处理
+                        if isinstance(product_name, list) and len(product_name) > 1:
+                            # 使用详细商品信息生成显示
+                            if product_details:
+                                product_parts = []
+                                for detail in product_details:
+                                    if detail['quantity'] > 1:
+                                        product_parts.append(f"{detail['name']}×{detail['quantity']}")
+                                    else:
+                                        product_parts.append(detail['name'])
+                                product_display = ' + '.join(product_parts)
+                            else:
+                                product_display = ' + '.join(product_name)
+                        else:
+                            product_display = product_name
+                        
+                        if actual_price > 0:
+                            print(f"💰 订单{order_id}的实际价格: ¥{actual_price}")
+                        if product_display != '无商品信息':
+                            print(f"📦 订单{order_id}的商品名称: {product_display}")
+                        if quantity > 1:
+                            print(f"📊 订单{order_id}的总份数: {quantity}")
+                        
+                        # 检查是否已存在
+                        existing_row = None
+                        if existing_df is not None and '订单编号' in existing_df.columns:
+                            existing_matches = existing_df[existing_df['订单编号'].astype(str).str.strip() == order_id]
+                            if not existing_matches.empty:
+                                existing_row = existing_matches.iloc[0]
+                        
+                        if existing_row is not None:
+                            # 使用现有状态，更新其他信息
+                            existing_status = str(existing_row.get('状态', '2'))
+                            status_name = get_status_name(existing_status)
+                            frontend_row = {
+                                '订单编号': order_id,
+                                '手机号码': str(new_row.get('手机号码', '')).strip(),
+                                '姓名': str(new_row.get('姓名', '')).strip(),
+                                '部门': str(new_row.get('部门', '')).strip(),
+                                '支付时间': str(new_row.get('支付时间', '')).strip(),
+                                '商品名称': product_display,
+                                '份数': quantity,
+                                '订单备注': str(new_row.get('订单备注', '')).strip(),
+                                '状态': existing_status,
+                                '状态名称': status_name,
+                                '实际价格': actual_price
+                            }
+                            print(f"🔄 更新订单: {order_id} (保持状态: {status_name}, 价格: ¥{actual_price}, 商品: {product_display}, 份数: {quantity})")
+                        else:
+                            # 新订单
+                            frontend_row = {
+                                '订单编号': order_id,
+                                '手机号码': str(new_row.get('手机号码', '')).strip(),
+                                '姓名': str(new_row.get('姓名', '')).strip(),
+                                '部门': str(new_row.get('部门', '')).strip(),
+                                '支付时间': str(new_row.get('支付时间', '')).strip(),
+                                '商品名称': product_display,
+                                '份数': quantity,
+                                '订单备注': str(new_row.get('订单备注', '')).strip(),
+                                '状态': '2',
+                                '状态名称': '备货中',
+                                '实际价格': actual_price
+                            }
+                            print(f"🆕 新增订单: {order_id} (状态: 备货中, 价格: ¥{actual_price}, 商品: {product_display}, 份数: {quantity})")
+                        
+                        frontend_data.append(frontend_row)
                     
                 except Exception as row_error:
                     print(f"❌ 处理第 {index + 1} 行数据时出错: {row_error}")
