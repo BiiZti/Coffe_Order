@@ -39,6 +39,24 @@ download_dir = os.path.join(os.path.expanduser("~"), "Downloads")
 # 创建项目数据文件夹
 project_data_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
 os.makedirs(project_data_dir, exist_ok=True)
+
+# ==== 窗口配置 ====
+# 后台窗口位置和大小配置（可根据需要调整）
+BACKGROUND_WINDOW_X = 1600  # 窗口X坐标
+BACKGROUND_WINDOW_Y = 800   # 窗口Y坐标
+BACKGROUND_WINDOW_WIDTH = 400   # 窗口宽度
+BACKGROUND_WINDOW_HEIGHT = 300  # 窗口高度
+MINIMIZE_MONITOR_INTERVAL = 2   # 监控间隔（秒）
+
+# 登录阶段窗口配置（正常大小，方便操作）
+LOGIN_WINDOW_X = 100  # 登录窗口X坐标
+LOGIN_WINDOW_Y = 100  # 登录窗口Y坐标
+LOGIN_WINDOW_WIDTH = 1200  # 登录窗口宽度
+LOGIN_WINDOW_HEIGHT = 800  # 登录窗口高度
+
+# ==== 门店配置 ====
+STORE_NUMBER = "s100023(邮政平台产品)"  # 门店编号（邮政平台产品）
+
 chrome_options = Options()
 chrome_options.add_experimental_option("debuggerAddress", "127.0.0.1:80")
 # 添加基础后台运行选项（兼容性更好）
@@ -165,35 +183,67 @@ import atexit
 atexit.register(cleanup_connections)
 
 
+def setup_login_window():
+    """设置登录窗口为正常大小，方便用户操作"""
+    try:
+        # 设置窗口为正常大小
+        driver.set_window_position(LOGIN_WINDOW_X, LOGIN_WINDOW_Y)
+        driver.set_window_size(LOGIN_WINDOW_WIDTH, LOGIN_WINDOW_HEIGHT)
+        
+        # 确保窗口可见
+        driver.execute_script("window.focus();")
+        
+        print(f"✅ 已设置登录窗口大小: {LOGIN_WINDOW_WIDTH}x{LOGIN_WINDOW_HEIGHT}")
+        print(f"📍 窗口位置: ({LOGIN_WINDOW_X}, {LOGIN_WINDOW_Y})")
+        return True
+    except Exception as e:
+        print(f"⚠️ 设置登录窗口失败: {e}")
+        return False
+
+def setup_background_window():
+    """设置窗口为后台运行模式（登录完成后使用）- 调试模式暂时禁用"""
+    try:
+        # 调试模式：暂时不执行后台设置
+        # driver.minimize_window()
+        # time.sleep(0.05) # Reduced sleep for faster transition
+        # driver.set_window_position(BACKGROUND_WINDOW_X, BACKGROUND_WINDOW_Y)
+        # driver.set_window_size(BACKGROUND_WINDOW_WIDTH, BACKGROUND_WINDOW_HEIGHT)
+        # driver.execute_script("window.focus = function() {};")
+        # driver.execute_script("window.blur();")
+        print(f"✅ 调试模式：窗口保持正常大小")
+        return True
+    except Exception as e:
+        print(f"⚠️ 设置后台窗口失败: {e}")
+        return False
+
+
 def start_minimize_monitor():
-    """启动持续最小化监控"""
+    """启动最小化监控（暂时禁用，方便调试）"""
     global minimize_monitor_active
     if minimize_monitor_active:
         return
     
     minimize_monitor_active = True
-    print("🔒 启动持续最小化监控...")
+    print("🔍 最小化监控已启动（调试模式：窗口保持可见）")
     
     def monitor_minimize():
-        global minimize_monitor_active
-        while minimize_monitor_active:
-            try:
-                # 强制最小化窗口
-                driver.minimize_window()
-                # 设置窗口为后台
-                driver.execute_script("window.focus = function() {};")
-                driver.execute_script("window.blur();")
-                # 移动窗口到屏幕外
-                driver.execute_script("window.moveTo(-1000, -1000);")
-                driver.execute_script("window.resizeTo(1, 1);")
-            except Exception as e:
-                pass
-            time.sleep(1)  # 每秒检查一次
+        if not minimize_monitor_active:
+            return
+        
+        try:
+            # 调试模式：暂时不执行最小化操作
+            # driver.execute_script("window.moveTo(1600, 800);")
+            # driver.execute_script("window.resizeTo(400, 300);")
+            # driver.execute_script("window.focus = function() {};")
+            # driver.execute_script("window.blur();")
+            pass
+        except Exception as e:
+            print(f"⚠️ 最小化监控出错: {e}")
+        
+        if minimize_monitor_active:
+            root.after(MINIMIZE_MONITOR_INTERVAL * 1000, monitor_minimize)
     
-    # 在后台线程中运行监控
-    import threading
-    monitor_thread = threading.Thread(target=monitor_minimize, daemon=True)
-    monitor_thread.start()
+    monitor_minimize()
 
 
 def stop_minimize_monitor():
@@ -301,7 +351,7 @@ def move_file_to_project_data(source_path, target_filename):
 
 
 def switch_to_target_tab():
-    """切换到目标标签页或创建新标签页（云电脑兼容版）"""
+    """切换到目标标签页或创建新标签页（改进版 - 登录时使用正常窗口）"""
     target_url_prefix = "https://zhst.cmft.com.cn/mgmt/index.html#"
     
     # 首先尝试找到现有的目标页面
@@ -316,6 +366,9 @@ def switch_to_target_tab():
     driver.execute_script("window.open('');")
     driver.switch_to.window(driver.window_handles[-1])
     
+    # 设置登录窗口为正常大小，方便用户操作
+    setup_login_window()
+    
     # 导航到登录页面
     login_url = "https://zhst.cmft.com.cn/mgmt/index.html#/login?redirect=%2Fmerchant-service%2Fmerchant-mgmt%2FMerchantInfoMgmtNew2"
     driver.get(login_url)
@@ -324,62 +377,25 @@ def switch_to_target_tab():
     # 等待用户登录
     print("⏳ 等待用户登录...")
     print("💡 请在浏览器中完成登录，然后输入 '已登录' 继续程序")
+    print("📝 提示：登录窗口已设置为正常大小，方便您操作")
     
     while True:
         user_input = input("请输入 '已登录' 继续程序: ").strip()
         if user_input == "已登录":
-            print("✅ 用户确认已登录，继续程序...")
+            print("✅ 用户确认已登录，切换到后台模式...")
             break
         else:
             print("❌ 输入错误，请输入 '已登录'")
     
-    # 用户登录确认后，启动持续最小化监控
+    # 用户登录确认后，切换到后台模式
+    print("🔄 切换到后台运行模式...")
+    setup_background_window()
+    
+    # 启动持续最小化监控
     print("🔒 启动持续最小化监控...")
     start_minimize_monitor()
     
-    # 强制最小化窗口并设置为后台运行（云电脑环境）
-    try:
-        # 多次尝试最小化，确保在云电脑环境中生效
-        for i in range(3):
-            driver.minimize_window()
-            time.sleep(0.5)
-        
-        # 设置窗口为后台运行
-        driver.execute_script("window.focus = function() {};")
-        driver.execute_script("window.blur();")
-        
-        # 禁用窗口激活事件（云电脑环境）
-        driver.execute_script("""
-            // 禁用所有可能的焦点事件
-            window.addEventListener('focus', function(e) {
-                e.preventDefault();
-                e.stopPropagation();
-                window.blur();
-                return false;
-            }, true);
-            
-            window.addEventListener('activate', function(e) {
-                e.preventDefault();
-                e.stopPropagation();
-                return false;
-            }, true);
-            
-            // 设置窗口属性
-            window.name = 'background_window';
-            window.opener = null;
-            
-            // 尝试禁用下载栏
-            if (window.chrome && window.chrome.downloads) {
-                window.chrome.downloads.onChanged.addListener(function(downloadDelta) {
-                    // 阻止下载栏显示
-                    return false;
-                });
-            }
-        """)
-        print("✅ 已最小化后台标签页窗口并设置为后台运行")
-    except Exception as e:
-        print(f"⚠️ 窗口设置警告: {e}")
-        print("✅ 已创建新标签页用于后台操作")
+    print("✅ 已创建新标签页并设置为后台运行")
 
 
 def check_login_status():
@@ -404,7 +420,7 @@ def check_login_status():
 
 
 def click_waimai_menu():
-    """静默跳转到外卖订单管理页面，确保在后台运行（云电脑兼容版）"""
+    """静默跳转到外卖订单管理页面，确保在后台运行（简化版）"""
     current_url = driver.current_url
     target_url = "https://zhst.cmft.com.cn/mgmt/index.html#/report-form/take-out-order-mgmt/OlOrderMgmt"
     
@@ -417,50 +433,6 @@ def click_waimai_menu():
     if not current_url.endswith("OlOrderMgmt"):
         print("🔄 准备跳转到外卖订单管理页面...")
         
-        # 强制窗口最小化（云电脑环境）
-        try:
-            # 多次尝试最小化，确保在云电脑环境中生效
-            for i in range(3):
-                driver.minimize_window()
-                time.sleep(0.5)
-            
-            # 设置窗口为后台运行
-            driver.execute_script("window.focus = function() {};")
-            driver.execute_script("window.blur();")
-            
-            # 禁用窗口激活事件（更强制的方式）
-            driver.execute_script("""
-                // 禁用所有可能的焦点事件
-                window.addEventListener('focus', function(e) {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    window.blur();
-                    return false;
-                }, true);
-                
-                window.addEventListener('activate', function(e) {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    return false;
-                }, true);
-                
-                // 设置窗口属性
-                window.name = 'background_window';
-                window.opener = null;
-                
-                // 持续监控并最小化
-                setInterval(function() {
-                    if (window.innerHeight > 100) {
-                        window.resizeTo(1, 1);
-                        window.moveTo(-1000, -1000);
-                    }
-                }, 100);
-            """)
-            
-            print("✅ 已设置窗口为后台运行模式")
-        except Exception as e:
-            print(f"⚠️ 窗口设置警告: {e}")
-        
         # 使用JavaScript进行静默跳转
         try:
             driver.execute_script(f"window.location.href = '{target_url}';")
@@ -471,23 +443,50 @@ def click_waimai_menu():
         
         # 等待页面加载完成
         time.sleep(3)
-        
-        # 再次强制最小化（云电脑环境需要多次尝试）
-        try:
-            for i in range(2):
-                driver.minimize_window()
-                time.sleep(0.5)
-            
-            # 再次设置后台运行
-            driver.execute_script("window.focus = function() {};")
-            driver.execute_script("window.blur();")
-            print("✅ 已确保窗口保持最小化状态")
-        except Exception as e:
-            print(f"⚠️ 最终窗口设置警告: {e}")
+        print("✅ 页面加载完成")
     else:
         print("✅ 已在外卖订单管理页面")
     
     return True
+
+
+def set_store_number():
+    """设置门店编号"""
+    try:
+        print("🏪 设置门店编号...")
+        
+        # 等待门店编号输入框出现
+        store_input = WebDriverWait(driver, 20).until(
+            EC.element_to_be_clickable((By.XPATH, "//input[@placeholder='请选择门店编号' and @class='el-input__inner']"))
+        )
+        
+        # 点击输入框
+        driver.execute_script("arguments[0].click();", store_input)
+        time.sleep(1)
+        
+        # 清空输入框（如果有内容的话）
+        store_input.clear()
+        time.sleep(0.5)
+        
+        # 直接输入门店编号名称
+        store_input.send_keys(STORE_NUMBER)
+        time.sleep(2)  # 等待下拉选项出现
+        
+        # 查找并点击下拉选项中的门店编号
+        store_option = WebDriverWait(driver, 10).until(
+            EC.element_to_be_clickable((By.XPATH, f"//li[contains(@class, 'el-select-dropdown__item')]//span[text()='{STORE_NUMBER}']"))
+        )
+        
+        # 点击选项确认选择
+        driver.execute_script("arguments[0].click();", store_option)
+        time.sleep(1)
+        
+        print(f"✅ 已设置门店编号: {STORE_NUMBER}")
+        return True
+        
+    except Exception as e:
+        print(f"❌ 设置门店编号失败: {e}")
+        return False
 
 
 def click_query_button():
@@ -1101,13 +1100,28 @@ def do_check():
     download_monitor = start_download_monitor()
 
     try:
+        # 确保所有操作都在后台进行
+        # ensure_background_operation() # 暂时禁用确保后台操作
+        
         switch_to_target_tab()
         if not click_waimai_menu():
             print("❌ 登录状态检查失败，等待用户登录...")
             root.after(60000, do_check)  # 1分钟后重试
             return
+        
+        # 设置门店编号
+        if not set_store_number():
+            print("❌ 设置门店编号失败，重试中...")
+            root.after(30000, do_check)
+            return
+        
+        # 确保在后台点击按钮
+        # ensure_background_operation() # 暂时禁用确保后台操作
         click_query_button()
+        
+        # ensure_background_operation() # 暂时禁用确保后台操作
         click_export_button()
+        
     except Exception as e:
         logging.exception("❌ 点击页面元素失败")
         # 如果是connection pool错误，尝试清理连接
@@ -1171,12 +1185,16 @@ def start_program():
     print("=" * 50)
     print("📋 程序功能：")
     print("   • 自动监控外卖系统中的咖啡订单")
+    print("   • 自动设置门店编号: s100023(邮政平台产品)")
     print("   • 每30秒检测一次新订单（快速响应）")
     print("   • 自动筛选咖啡类订单")
     print("   • 声音提示（无弹窗干扰）")
     print("   • 自动管理Excel文件")
     print("   • 静默运行，不干扰前端用户")
     print("   • 持续最小化监控，防止窗口弹出")
+    print("=" * 50)
+    print("🔍 当前模式：调试模式（窗口保持可见，方便观察）")
+    print("💡 调试完成后可恢复后台运行模式")
     print("=" * 50)
     
     if is_valid_xlsx(coffee_path):
