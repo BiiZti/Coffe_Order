@@ -201,56 +201,69 @@ def setup_login_window():
         return False
 
 def setup_background_window():
-    """设置窗口为后台运行模式（登录完成后使用）- 调试模式暂时禁用"""
+    """设置窗口为后台运行模式（登录完成后使用）"""
     try:
-        # 调试模式：暂时不执行后台设置
-        # driver.minimize_window()
-        # time.sleep(0.05) # Reduced sleep for faster transition
-        # driver.set_window_position(BACKGROUND_WINDOW_X, BACKGROUND_WINDOW_Y)
-        # driver.set_window_size(BACKGROUND_WINDOW_WIDTH, BACKGROUND_WINDOW_HEIGHT)
-        # driver.execute_script("window.focus = function() {};")
-        # driver.execute_script("window.blur();")
-        print(f"✅ 调试模式：窗口保持正常大小")
+        # 隐藏窗口而不是最小化，保持页面布局不变
+        driver.execute_script("window.focus = function() {};")
+        driver.execute_script("window.blur();")
+        
+        # 移动窗口到屏幕外，实现隐藏效果
+        driver.set_window_position(3000, 3000)  # 移动到屏幕外
+        driver.set_window_size(BACKGROUND_WINDOW_WIDTH, BACKGROUND_WINDOW_HEIGHT)
+        
+        print(f"✅ 已隐藏窗口到后台位置")
         return True
     except Exception as e:
         print(f"⚠️ 设置后台窗口失败: {e}")
         return False
 
 
+def ensure_background_operation():
+    """确保窗口在后台运行"""
+    try:
+        driver.execute_script("window.focus = function() {};")
+        driver.execute_script("window.blur();")
+        # 移动窗口到屏幕外，实现隐藏效果
+        driver.execute_script("window.moveTo(3000, 3000);")
+        driver.execute_script(f"window.resizeTo({BACKGROUND_WINDOW_WIDTH}, {BACKGROUND_WINDOW_HEIGHT});")
+    except Exception as e:
+        print(f"⚠️ 后台操作设置失败: {e}")
+
+
 def start_minimize_monitor():
-    """启动最小化监控（暂时禁用，方便调试）"""
+    """启动持续隐藏监控（改进版 - 保持页面布局不变）"""
     global minimize_monitor_active
     if minimize_monitor_active:
         return
     
     minimize_monitor_active = True
-    print("🔍 最小化监控已启动（调试模式：窗口保持可见）")
+    print("🔒 启动持续隐藏监控...")
     
     def monitor_minimize():
-        if not minimize_monitor_active:
-            return
-        
-        try:
-            # 调试模式：暂时不执行最小化操作
-            # driver.execute_script("window.moveTo(1600, 800);")
-            # driver.execute_script("window.resizeTo(400, 300);")
-            # driver.execute_script("window.focus = function() {};")
-            # driver.execute_script("window.blur();")
-            pass
-        except Exception as e:
-            print(f"⚠️ 最小化监控出错: {e}")
-        
-        if minimize_monitor_active:
-            root.after(MINIMIZE_MONITOR_INTERVAL * 1000, monitor_minimize)
+        global minimize_monitor_active
+        while minimize_monitor_active:
+            try:
+                # 隐藏窗口但保持页面布局不变
+                driver.execute_script("window.focus = function() {};")
+                driver.execute_script("window.blur();")
+                # 移动窗口到屏幕外，实现隐藏效果
+                driver.execute_script("window.moveTo(3000, 3000);")
+                driver.execute_script(f"window.resizeTo({BACKGROUND_WINDOW_WIDTH}, {BACKGROUND_WINDOW_HEIGHT});")
+            except Exception as e:
+                pass
+            time.sleep(MINIMIZE_MONITOR_INTERVAL)  # 使用配置的监控间隔
     
-    monitor_minimize()
+    # 在后台线程中运行监控
+    import threading
+    monitor_thread = threading.Thread(target=monitor_minimize, daemon=True)
+    monitor_thread.start()
 
 
 def stop_minimize_monitor():
-    """停止持续最小化监控"""
+    """停止持续隐藏监控"""
     global minimize_monitor_active
     minimize_monitor_active = False
-    print("🔓 停止持续最小化监控")
+    print("🔓 停止持续隐藏监控")
 
 
 def is_valid_xlsx(path):
@@ -442,7 +455,7 @@ def click_waimai_menu():
             driver.get(target_url)
         
         # 等待页面加载完成
-        time.sleep(3)
+        time.sleep(2)  # 减少等待时间
         print("✅ 页面加载完成")
     else:
         print("✅ 已在外卖订单管理页面")
@@ -455,37 +468,74 @@ def set_store_number():
     try:
         print("🏪 设置门店编号...")
         
+        # 暂时恢复窗口可见状态，方便操作
+        print("🔄 暂时恢复窗口可见状态...")
+        # 移动窗口到可见位置而不是最大化，保持页面布局
+        driver.set_window_position(100, 100)
+        driver.set_window_size(1200, 800)
+        time.sleep(0.5)  # 减少等待时间
+        
+        # 等待页面完全加载
+        time.sleep(1.5)  # 减少等待时间
+        
         # 等待门店编号输入框出现
-        store_input = WebDriverWait(driver, 20).until(
+        print("🔍 等待门店编号输入框...")
+        store_input = WebDriverWait(driver, 15).until(  # 减少超时时间
             EC.element_to_be_clickable((By.XPATH, "//input[@placeholder='请选择门店编号' and @class='el-input__inner']"))
         )
         
+        print("✅ 找到门店编号输入框")
+        
+        # 滚动到元素位置
+        driver.execute_script("arguments[0].scrollIntoView(true);", store_input)
+        time.sleep(0.3)  # 减少等待时间
+        
         # 点击输入框
+        print("🖱️ 点击门店编号输入框...")
         driver.execute_script("arguments[0].click();", store_input)
-        time.sleep(1)
+        time.sleep(0.8)  # 减少等待时间
         
         # 清空输入框（如果有内容的话）
+        print("🧹 清空输入框...")
         store_input.clear()
-        time.sleep(0.5)
+        time.sleep(0.3)  # 减少等待时间
         
         # 直接输入门店编号名称
+        print(f"⌨️ 输入门店编号: {STORE_NUMBER}")
         store_input.send_keys(STORE_NUMBER)
-        time.sleep(2)  # 等待下拉选项出现
+        time.sleep(1.5)  # 减少等待时间，但保持足够时间让下拉选项出现
         
         # 查找并点击下拉选项中的门店编号
-        store_option = WebDriverWait(driver, 10).until(
+        print("🔍 查找下拉选项...")
+        store_option = WebDriverWait(driver, 8).until(  # 减少超时时间
             EC.element_to_be_clickable((By.XPATH, f"//li[contains(@class, 'el-select-dropdown__item')]//span[text()='{STORE_NUMBER}']"))
         )
         
+        print("✅ 找到目标选项")
+        
         # 点击选项确认选择
+        print("🖱️ 点击确认选择...")
         driver.execute_script("arguments[0].click();", store_option)
-        time.sleep(1)
+        time.sleep(0.8)  # 减少等待时间
         
         print(f"✅ 已设置门店编号: {STORE_NUMBER}")
+        
+        # 设置完成后恢复后台模式
+        print("🔄 恢复后台模式...")
+        setup_background_window()
+        
         return True
         
     except Exception as e:
         print(f"❌ 设置门店编号失败: {e}")
+        print(f"🔍 错误详情: {type(e).__name__}")
+        
+        # 即使失败也要恢复后台模式
+        try:
+            setup_background_window()
+        except:
+            pass
+        
         return False
 
 
@@ -507,15 +557,15 @@ def click_export_button():
     # 处理可能的下载权限弹窗
     try:
         # 等待弹窗出现
-        time.sleep(2)
+        time.sleep(1)  # 减少等待时间
         
         # 尝试查找并点击"允许"按钮
-        allow_button = WebDriverWait(driver, 5).until(
+        allow_button = WebDriverWait(driver, 3).until(  # 减少超时时间
             EC.element_to_be_clickable((By.XPATH, "//button[contains(text(),'允许') or contains(text(),'Allow')]"))
         )
         allow_button.click()
         print("✅ 已自动允许下载权限")
-        time.sleep(1)
+        time.sleep(0.5)  # 减少等待时间
     except:
         # 如果没有弹窗，继续正常流程
         print("✅ 无需处理下载权限弹窗")
@@ -1101,7 +1151,7 @@ def do_check():
 
     try:
         # 确保所有操作都在后台进行
-        # ensure_background_operation() # 暂时禁用确保后台操作
+        ensure_background_operation()
         
         switch_to_target_tab()
         if not click_waimai_menu():
@@ -1109,17 +1159,26 @@ def do_check():
             root.after(60000, do_check)  # 1分钟后重试
             return
         
-        # 设置门店编号
+        # 设置门店编号（暂时停止最小化监控）
+        print("⏸️ 暂时停止最小化监控...")
+        stop_minimize_monitor()
+        
         if not set_store_number():
             print("❌ 设置门店编号失败，重试中...")
+            # 重新启动最小化监控
+            start_minimize_monitor()
             root.after(30000, do_check)
             return
         
+        # 重新启动最小化监控
+        print("▶️ 重新启动最小化监控...")
+        start_minimize_monitor()
+        
         # 确保在后台点击按钮
-        # ensure_background_operation() # 暂时禁用确保后台操作
+        ensure_background_operation()
         click_query_button()
         
-        # ensure_background_operation() # 暂时禁用确保后台操作
+        ensure_background_operation()
         click_export_button()
         
     except Exception as e:
@@ -1191,10 +1250,7 @@ def start_program():
     print("   • 声音提示（无弹窗干扰）")
     print("   • 自动管理Excel文件")
     print("   • 静默运行，不干扰前端用户")
-    print("   • 持续最小化监控，防止窗口弹出")
-    print("=" * 50)
-    print("🔍 当前模式：调试模式（窗口保持可见，方便观察）")
-    print("💡 调试完成后可恢复后台运行模式")
+    print("   • 持续隐藏监控，防止窗口弹出")
     print("=" * 50)
     
     if is_valid_xlsx(coffee_path):
